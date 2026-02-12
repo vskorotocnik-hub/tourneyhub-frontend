@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <link rel="preconnect" href="https://img.youtube.com">
+    <link rel="preconnect" href="https://images.unsplash.com">
+    <link rel="preconnect" href="https://api.dicebear.com">
+    <link rel="dns-prefetch" href="https://img.youtube.com">
+    <link rel="dns-prefetch" href="https://images.unsplash.com">
+    <link rel="dns-prefetch" href="https://api.dicebear.com">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Russo+One&display=swap" rel="stylesheet">
+    <title>tournament-app</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+    <!-- Disable pinch-to-zoom on iOS Safari -->
+    <script>
+      document.addEventListener('gesturestart', function(e) { e.preventDefault(); });
+      document.addEventListener('gesturechange', function(e) { e.preventDefault(); });
+      document.addEventListener('gestureend', function(e) { e.preventDefault(); });
+      document.addEventListener('touchmove', function(e) {
+        if (e.touches.length > 1) { e.preventDefault(); }
+      }, { passive: false });
+    </script>
+    <!-- Cloudflare Web Analytics -->
+    <script defer src='https://static.cloudflareinsights.com/beacon.min.js' data-cf-beacon='{"token": "0a86017fb658414c8208c499aaeaf7d5"}'></script>
+    <!-- End Cloudflare Web Analytics -->
+  </body>
+</html>

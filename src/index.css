@@ -1,0 +1,75 @@
+@import 'tailwindcss/base';
+@import 'tailwindcss/components';
+@import 'tailwindcss/utilities';
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body {
+  touch-action: manipulation;
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  background: 
+    linear-gradient(to bottom, rgba(10, 10, 20, 0.85), rgba(10, 10, 20, 0.92)),
+    url('/bg.jpg') center/cover fixed;
+  min-height: 100vh;
+  color: #ffffff;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overscroll-behavior: none;
+}
+
+#root {
+  min-height: 100vh;
+  background: 
+    linear-gradient(to bottom, rgba(10, 10, 20, 0.85), rgba(10, 10, 20, 0.92)),
+    url('/bg.jpg') center/cover fixed;
+}
+
+/* Hide scrollbar but keep scrolling */
+* {
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* IE/Edge */
+}
+
+*::-webkit-scrollbar {
+  display: none; /* Chrome/Safari/Opera */
+}
+
+/* Bottom sheet animation */
+@keyframes slide-up {
+  from {
+    transform: translateY(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.animate-slide-up {
+  animation: slide-up 0.3s ease-out forwards;
+}
+
+/* Slide left animation for ticker */
+@keyframes slide-left {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+.animate-slide-left {
+  animation: slide-left 6s linear infinite;
+}
+
+/* Page loader fade out */
+@keyframes fadeOut {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
