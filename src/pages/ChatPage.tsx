@@ -153,8 +153,11 @@ const ChatPage = () => {
       };
 
       const handleTournamentUpdate = () => {
-        // Refresh tournament detail and disputes on any update
+        // Refresh tournament detail, messages, and disputes on any update
         tournamentApi.get(realTournamentId).then(setTournamentDetail).catch(() => {});
+        tournamentApi.getMessages(realTournamentId).then(data => {
+          setMessages(data.messages.map(m => mapMsg(m, chatId!)));
+        }).catch(() => {});
         tournamentApi.getDisputes(realTournamentId).then(d => setDisputes(d.disputes)).catch(() => {});
       };
 
