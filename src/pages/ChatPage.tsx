@@ -591,7 +591,16 @@ const ChatPage = () => {
           );
         })()}
 
-        {messages.map((message) => (
+        {messages
+          .filter(m => {
+            // Hide old verbose system messages that are no longer generated
+            if (m.type === 'system') {
+              const c = m.content;
+              if (c.includes('вступил в турнир') || c.includes('покинул турнир') || c.includes('Ищем замену')) return false;
+            }
+            return true;
+          })
+          .map((message) => (
           <MessageBubble key={message.id} message={message} currentUserId={user?.id} />
         ))}
         <div ref={messagesEndRef} />
