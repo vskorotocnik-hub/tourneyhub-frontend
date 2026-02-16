@@ -67,20 +67,29 @@ const ChatPage = () => {
   }), []);
 
   // Load sidebar chats from API — reload on user change and chatId change
-  useEffect(() => {
+  const loadSidebarChats = useCallback(() => {
     if (!user) return;
-    let retryTimeout: ReturnType<typeof setTimeout>;
     tournamentApi.myChats()
       .then(res => setSidebarChats([defaultSupportChat, ...res.chats.map(apiToChat)]))
-      .catch(() => {
-        retryTimeout = setTimeout(() => {
-          tournamentApi.myChats()
-            .then(res => setSidebarChats([defaultSupportChat, ...res.chats.map(apiToChat)]))
-            .catch(() => {});
-        }, 2000);
-      });
-    return () => clearTimeout(retryTimeout);
-  }, [user, chatId]);
+      .catch(() => {});
+  }, [user]);
+
+  useEffect(() => {
+    loadSidebarChats();
+  }, [loadSidebarChats, chatId]);
+
+  // Real-time: refresh sidebar when tournaments change
+  useEffect(() => {
+    const socket = getSocket();
+    if (!socket) return;
+    const refresh = () => loadSidebarChats();
+    socket.on('tournaments:list_changed', refresh);
+    socket.on('unread:update', refresh);
+    return () => {
+      socket.off('tournaments:list_changed', refresh);
+      socket.off('unread:update', refresh);
+    };
+  }, [loadSidebarChats]);
 
   // Issue 7 fix: Clear messages immediately when switching chats to prevent flash
   useEffect(() => {

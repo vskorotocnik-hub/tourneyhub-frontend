@@ -2,6 +2,7 @@ import { memo, useState, useEffect, useCallback } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { tournamentApi } from '../lib/api';
+import { getSocket } from '../lib/socket';
 
 type NavIcon = 'home' | 'tasks' | 'friends' | 'sell' | 'messages' | 'profile';
 
@@ -36,8 +37,23 @@ const BottomNav = memo(() => {
 
   useEffect(() => {
     fetchUnread();
-    const iv = setInterval(fetchUnread, 15000);
+    const iv = setInterval(fetchUnread, 30000);
     return () => clearInterval(iv);
+  }, [fetchUnread]);
+
+  // Real-time: refresh unread count on socket events
+  useEffect(() => {
+    const socket = getSocket();
+    if (!socket) return;
+    const refresh = () => fetchUnread();
+    socket.on('unread:update', refresh);
+    socket.on('chat:message', refresh);
+    socket.on('tournaments:list_changed', refresh);
+    return () => {
+      socket.off('unread:update', refresh);
+      socket.off('chat:message', refresh);
+      socket.off('tournaments:list_changed', refresh);
+    };
   }, [fetchUnread]);
 
   const icons: Record<NavIcon, React.ReactNode> = {

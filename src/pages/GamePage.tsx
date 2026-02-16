@@ -97,6 +97,13 @@ const GamePage = () => {
   const [teamsJoinedCount, setTeamsJoinedCount] = useState(1); // creator's team is always joined
   const [allOpponents, setAllOpponents] = useState<{username: string, avatar: string}[]>([]);
 
+  // Join flow state — which tournament card is expanded for ID input
+  const [joiningTournament, setJoiningTournament] = useState<TournamentListItem | null>(null);
+  const [joinPlayerId, setJoinPlayerId] = useState('');
+  const [joinPartnerId, setJoinPartnerId] = useState('');
+  const [joinError, setJoinError] = useState('');
+  const [joinLoading, setJoinLoading] = useState(false);
+
   // Poll tournament status while searching
   useEffect(() => {
     let interval: ReturnType<typeof setInterval>;
@@ -163,19 +170,23 @@ const GamePage = () => {
     loadOpenTournaments();
   }, [loadOpenTournaments]);
 
-  // Real-time: refresh open tournaments + handle tournament started via Socket.IO
+  // Real-time: global tournament list changes + tournament started via Socket.IO
   useEffect(() => {
     const socket = getSocket();
     if (!socket) return;
 
-    const handleTournamentUpdate = (data: any) => {
-      // Refresh open tournaments list when someone joins/leaves
-      if (data.event === 'player_joined' || data.event === 'player_left') {
-        if (activeMode === 'tdm' && actionTab === 'join') {
-          tournamentApi.list({ server: server.toUpperCase() })
-            .then(res => setOpenTournaments(res.tournaments))
-            .catch(() => {});
-        }
+    const handleListChanged = () => {
+      // Refresh open tournaments list (join tab)
+      if (activeMode === 'tdm' && actionTab === 'join') {
+        tournamentApi.list({ server: server.toUpperCase() })
+          .then(res => setOpenTournaments(res.tournaments))
+          .catch(() => {});
+      }
+      // Refresh active tournaments banner
+      if (user) {
+        tournamentApi.myActive().then(res => {
+          setMyActiveTournaments(res.tournaments || []);
+        }).catch(() => {});
       }
     };
 
@@ -200,13 +211,13 @@ const GamePage = () => {
       }
     };
 
-    socket.on('tournament:update', handleTournamentUpdate);
+    socket.on('tournaments:list_changed', handleListChanged);
     socket.on('tournament:started', handleTournamentStarted);
     return () => {
-      socket.off('tournament:update', handleTournamentUpdate);
+      socket.off('tournaments:list_changed', handleListChanged);
       socket.off('tournament:started', handleTournamentStarted);
     };
-  }, [activeMode, actionTab, server, activeTournamentId, viewState]);
+  }, [activeMode, actionTab, server, activeTournamentId, viewState, user]);
 
   // Load all active tournaments on mount
   const loadActiveTournaments = useCallback(() => {
@@ -1507,32 +1518,10 @@ const GamePage = () => {
         {/* ===== JOIN TOURNAMENT SECTION ===== */}
         {activeMode === 'tdm' && actionTab === 'join' && (
         <div className="mb-4">
-          {/* Player ID input for joining */}
-          <div className="bg-dark-200/60 backdrop-blur-sm rounded-xl border border-white/20 p-3 mb-3">
-            <label className="text-xs text-white/50 mb-1.5 block">Твой PUBG ID (10 цифр)</label>
-            <input
-              type="text"
-              inputMode="numeric"
-              maxLength={10}
-              value={playerId}
-              onChange={e => { setPlayerId(e.target.value.replace(/\D/g, '')); setIdError(''); }}
-              placeholder="Введи свой ID чтобы вступить"
-              className={`w-full bg-dark-100/80 border rounded-lg px-3 py-2 text-sm text-white placeholder-white/30 outline-none transition-colors
-                        ${idError ? 'border-red-500/50' : 'border-white/10 focus:border-red-500/50'}`}
-            />
-            {idError && <p className="text-red-400 text-xs mt-1">{idError}</p>}
-          </div>
-
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-base font-bold text-white">⚡ Доступные турниры</h2>
             <span className="text-xs text-white/40">{openTournaments.length} активных</span>
           </div>
-
-          {createError && (
-            <div className="bg-red-500/20 border border-red-500/40 rounded-xl p-3 mb-3">
-              <p className="text-red-400 text-sm">{createError}</p>
-            </div>
-          )}
 
           {loadingTournaments ? (
             <div className="text-center py-8">
@@ -1546,10 +1535,15 @@ const GamePage = () => {
             </div>
           ) : (
           <div className="space-y-2">
-            {openTournaments.map((t) => (
+            {openTournaments.map((t) => {
+              const isExpanded = joiningTournament?.id === t.id;
+              const isDuo = t.teamMode === 'DUO';
+              return (
               <div 
                 key={t.id} 
-                className="bg-dark-200/60 backdrop-blur-sm rounded-xl border border-white/20 p-3"
+                className={`bg-dark-200/60 backdrop-blur-sm rounded-xl border p-3 transition-all ${
+                  isExpanded ? 'border-accent-green/50' : 'border-white/20'
+                }`}
               >
                 <div className="flex items-center gap-3 mb-2">
                   <img 
@@ -1560,7 +1554,7 @@ const GamePage = () => {
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-semibold text-white truncate">{t.creator?.username || 'Игрок'}</p>
                     <p className="text-xs text-white/40">
-                      {t.teamMode === 'SOLO' ? 'Solo' : 'Duo'} • {t.teamCount} команды • {serverNames[t.server.toLowerCase() as ServerRegion] || t.server}
+                      {isDuo ? 'Duo' : 'Solo'} • {t.teamCount} команды • {serverNames[t.server.toLowerCase() as ServerRegion] || t.server}
                     </p>
                   </div>
                   <div className="text-right">
@@ -1585,16 +1579,112 @@ const GamePage = () => {
                     </div>
                     <span className="text-xs text-white/50">{t.teamsJoined}/{t.teamCount} команд</span>
                   </div>
-                  <button
-                    onClick={() => handleJoinTournament(t)}
-                    className="px-4 py-1.5 rounded-lg bg-accent-green/20 border border-accent-green/50 
-                             text-accent-green text-xs font-semibold hover:bg-accent-green/30 transition-colors"
-                  >
-                    Вступить
-                  </button>
+                  {!isExpanded && (
+                    <button
+                      onClick={() => {
+                        if (!isAuthenticated) { setShowAuthModal(true); return; }
+                        setJoiningTournament(t);
+                        setJoinPlayerId('');
+                        setJoinPartnerId('');
+                        setJoinError('');
+                      }}
+                      className="px-4 py-1.5 rounded-lg bg-accent-green/20 border border-accent-green/50 
+                               text-accent-green text-xs font-semibold hover:bg-accent-green/30 transition-colors"
+                    >
+                      Вступить
+                    </button>
+                  )}
                 </div>
+
+                {/* Inline join form — appears after clicking Вступить */}
+                {isExpanded && (
+                  <div className="mt-3 pt-3 border-t border-white/10 space-y-2">
+                    <p className="text-xs text-white/60 font-medium">
+                      {isDuo ? '👥 Режим Duo — введи свой ID и ID напарника' : '👤 Режим Solo — введи свой PUBG ID'}
+                    </p>
+                    <div>
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        maxLength={10}
+                        value={joinPlayerId}
+                        onChange={e => { setJoinPlayerId(e.target.value.replace(/\D/g, '')); setJoinError(''); }}
+                        placeholder="Твой PUBG ID (10 цифр)"
+                        autoFocus
+                        className="w-full bg-dark-100/80 border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder-white/30 outline-none focus:border-accent-green/50 transition-colors"
+                      />
+                      <p className="text-xs text-white/30 mt-0.5 text-right">{joinPlayerId.length}/10</p>
+                    </div>
+                    {isDuo && (
+                      <div>
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          maxLength={10}
+                          value={joinPartnerId}
+                          onChange={e => { setJoinPartnerId(e.target.value.replace(/\D/g, '')); setJoinError(''); }}
+                          placeholder="ID напарника (10 цифр)"
+                          className="w-full bg-dark-100/80 border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder-white/30 outline-none focus:border-accent-green/50 transition-colors"
+                        />
+                        <p className="text-xs text-white/30 mt-0.5 text-right">{joinPartnerId.length}/10</p>
+                      </div>
+                    )}
+                    {joinError && <p className="text-red-400 text-xs">{joinError}</p>}
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => setJoiningTournament(null)}
+                        className="flex-1 py-2 rounded-lg bg-white/5 border border-white/10 text-white/50 text-xs font-medium hover:bg-white/10 transition-colors"
+                      >
+                        Отмена
+                      </button>
+                      <button
+                        onClick={async () => {
+                          if (!validateId(joinPlayerId)) { setJoinError('Введи свой ID (10 цифр)'); return; }
+                          if (isDuo && !validateId(joinPartnerId)) { setJoinError('Введи ID напарника (10 цифр)'); return; }
+                          setJoinLoading(true);
+                          setJoinError('');
+                          try {
+                            setBet(t.bet);
+                            setTeamMode(isDuo ? 'duo' : 'solo');
+                            setTeamCount(t.teamCount);
+                            if (t.server) setServer((t.server.toLowerCase() || 'europe') as ServerRegion);
+                            const result = await tournamentApi.join(t.id, {
+                              playerId: joinPlayerId,
+                              partnerId: isDuo ? joinPartnerId : undefined,
+                            });
+                            setActiveTournamentId(t.id);
+                            setViewState('searching');
+                            setSearchTime(0);
+                            setJoiningTournament(null);
+                            if (result.tournamentStarted) {
+                              try {
+                                const data = await tournamentApi.get(t.id);
+                                const opponentTeams = data.teams.filter(team => team.id !== data.userTeamId);
+                                const opponents = opponentTeams.map(team => {
+                                  const captain = team.players.find(p => p.isCaptain) || team.players[0];
+                                  return captain ? { username: captain.user.username, avatar: captain.user.avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${captain.user.username}` } : null;
+                                }).filter((o): o is {username: string; avatar: string} => o !== null);
+                                setAllOpponents(opponents);
+                                if (opponents.length > 0) setFoundOpponent(opponents[0]);
+                              } catch {}
+                            }
+                          } catch (err: any) {
+                            setJoinError(err?.message || 'Ошибка при вступлении');
+                          } finally {
+                            setJoinLoading(false);
+                          }
+                        }}
+                        disabled={joinLoading || !validateId(joinPlayerId) || (isDuo && !validateId(joinPartnerId))}
+                        className="flex-1 py-2 rounded-lg bg-accent-green/20 border border-accent-green/50 text-accent-green text-xs font-semibold hover:bg-accent-green/30 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
+                        {joinLoading ? '...' : 'Подтвердить'}
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
-            ))}
+              );
+            })}
           </div>
           )}
 

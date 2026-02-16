@@ -1,7 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { tournamentApi, supportApi, type TournamentChatItem } from '../lib/api';
+import { getSocket } from '../lib/socket';
 import type { Chat } from '../types';
 
 type ChatFilter = 'all' | 'active' | 'completed';
@@ -42,22 +43,37 @@ const MessagesPage = () => {
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<ChatFilter>('all');
 
+  const loadChats = useCallback(() => {
+    if (!user) return;
+    tournamentApi.myChats()
+      .then(res => setTournamentChats(res.chats.map(apiChatToChat)))
+      .catch(() => {});
+  }, [user]);
+
   useEffect(() => {
     if (!user) return;
     setLoading(true);
-    let retryTimeout: ReturnType<typeof setTimeout>;
     tournamentApi.myChats()
       .then(res => setTournamentChats(res.chats.map(apiChatToChat)))
-      .catch(() => {
-        retryTimeout = setTimeout(() => {
-          tournamentApi.myChats()
-            .then(res => setTournamentChats(res.chats.map(apiChatToChat)))
-            .catch(() => {});
-        }, 2000);
-      })
+      .catch(() => {})
       .finally(() => setLoading(false));
-    return () => clearTimeout(retryTimeout);
   }, [user]);
+
+  // Real-time: refresh chat list when tournaments change or new messages arrive
+  useEffect(() => {
+    const socket = getSocket();
+    if (!socket) return;
+
+    const refresh = () => loadChats();
+    socket.on('tournaments:list_changed', refresh);
+    socket.on('unread:update', refresh);
+    socket.on('chat:message', refresh);
+    return () => {
+      socket.off('tournaments:list_changed', refresh);
+      socket.off('unread:update', refresh);
+      socket.off('chat:message', refresh);
+    };
+  }, [loadChats]);
 
   // Filter chats based on tab
   const filteredTournamentChats = tournamentChats.filter(c => {
