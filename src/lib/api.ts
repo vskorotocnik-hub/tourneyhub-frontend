@@ -53,6 +53,12 @@ async function refreshAccessToken(): Promise<AuthTokens | null> {
       });
 
       if (!res.ok) {
+        // Before clearing, check if another tab already refreshed
+        const current = getStoredTokens();
+        if (current && current.refreshToken !== tokens.refreshToken) {
+          // Another tab already refreshed — use their tokens
+          return current;
+        }
         clearTokens();
         return null;
       }
@@ -65,6 +71,11 @@ async function refreshAccessToken(): Promise<AuthTokens | null> {
       storeTokens(newTokens);
       return newTokens;
     } catch {
+      // Before clearing, check if another tab already refreshed
+      const current = getStoredTokens();
+      if (current && current.refreshToken !== tokens.refreshToken) {
+        return current;
+      }
       clearTokens();
       return null;
     } finally {

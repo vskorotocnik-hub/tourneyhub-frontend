@@ -5,6 +5,7 @@ import { tournamentLeaders, serverNames, classicTournaments, classicLeaders, typ
 import { wowMaps, wowActiveMatches, wowLeaders } from '../data/wow';
 import { tournamentApi, type TournamentListItem, type ActiveTournamentData } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
+import { getSocket } from '../lib/socket';
 import AuthPromptModal from '../components/AuthPromptModal';
 
 type ViewState = 'create' | 'searching' | 'found';
@@ -148,7 +149,7 @@ const GamePage = () => {
   }, [viewState, activeTournamentId, navigate, foundOpponent]);
 
   // Load open tournaments for Join tab
-  useEffect(() => {
+  const loadOpenTournaments = useCallback(() => {
     if (activeMode === 'tdm' && actionTab === 'join') {
       setLoadingTournaments(true);
       tournamentApi.list({ server: server.toUpperCase() })
@@ -157,6 +158,55 @@ const GamePage = () => {
         .finally(() => setLoadingTournaments(false));
     }
   }, [activeMode, actionTab, server]);
+
+  useEffect(() => {
+    loadOpenTournaments();
+  }, [loadOpenTournaments]);
+
+  // Real-time: refresh open tournaments + handle tournament started via Socket.IO
+  useEffect(() => {
+    const socket = getSocket();
+    if (!socket) return;
+
+    const handleTournamentUpdate = (data: any) => {
+      // Refresh open tournaments list when someone joins/leaves
+      if (data.event === 'player_joined' || data.event === 'player_left') {
+        if (activeMode === 'tdm' && actionTab === 'join') {
+          tournamentApi.list({ server: server.toUpperCase() })
+            .then(res => setOpenTournaments(res.tournaments))
+            .catch(() => {});
+        }
+      }
+    };
+
+    const handleTournamentStarted = (data: { tournamentId: string }) => {
+      // If this is our active tournament, load opponent data
+      if (data.tournamentId === activeTournamentId && viewState === 'searching') {
+        tournamentApi.get(data.tournamentId).then(tData => {
+          setTeamsJoinedCount(tData.teams.length);
+          const opponentTeams = tData.teams.filter(t => t.id !== tData.userTeamId);
+          const opponents = opponentTeams
+            .map(t => {
+              const captain = t.players.find(p => p.isCaptain) || t.players[0];
+              return captain ? {
+                username: captain.user.username,
+                avatar: captain.user.avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${captain.user.username}`,
+              } : null;
+            })
+            .filter((o): o is {username: string; avatar: string} => o !== null);
+          setAllOpponents(opponents);
+          if (opponents.length > 0) setFoundOpponent(opponents[0]);
+        }).catch(() => {});
+      }
+    };
+
+    socket.on('tournament:update', handleTournamentUpdate);
+    socket.on('tournament:started', handleTournamentStarted);
+    return () => {
+      socket.off('tournament:update', handleTournamentUpdate);
+      socket.off('tournament:started', handleTournamentStarted);
+    };
+  }, [activeMode, actionTab, server, activeTournamentId, viewState]);
 
   // Load all active tournaments on mount
   const loadActiveTournaments = useCallback(() => {
@@ -297,9 +347,15 @@ const GamePage = () => {
       return;
     }
     try {
+      // Set tournament properties BEFORE joining so searching view shows correct layout
+      setBet(tournament.bet);
+      setTeamMode(tournament.teamMode === 'DUO' ? 'duo' : 'solo');
+      setTeamCount(tournament.teamCount);
+      if ('server' in tournament) setServer((tournament.server?.toLowerCase() || 'europe') as ServerRegion);
+
       const result = await tournamentApi.join(tournament.id, {
         playerId,
-        partnerId: teamMode === 'duo' ? partnerId : undefined,
+        partnerId: tournament.teamMode === 'DUO' ? partnerId : undefined,
       });
       setActiveTournamentId(tournament.id);
       setViewState('searching');

@@ -16,7 +16,7 @@ const funPhrases = [
   '💣 Готовим гранаты...',
 ];
 
-const DURATION = 1000;
+const DURATION = 400;
 
 const PageLoader = () => {
   const { pathname } = useLocation();

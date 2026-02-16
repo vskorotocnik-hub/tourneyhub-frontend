@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useEffect, useCallback, useRef, type ReactNode } from 'react';
 import { authApi, storeTokens, clearTokens, getStoredTokens, ApiError, type AuthUser } from '../lib/api';
-import { connectSocket, disconnectSocket } from '../lib/socket';
+import { connectSocket, disconnectSocket, getSocket } from '../lib/socket';
 
 interface AuthState {
   user: AuthUser | null;
@@ -156,6 +156,69 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // Ignore refresh errors
     }
   }, []);
+
+  // ─── Real-time balance updates via Socket.IO ──────────────────
+  useEffect(() => {
+    const socket = getSocket();
+    if (!socket) return;
+
+    const handleBalance = (data: { balance: number; ucBalance: number }) => {
+      setState(prev => {
+        if (!prev.user) return prev;
+        return {
+          ...prev,
+          user: {
+            ...prev.user,
+            balance: String(data.balance),
+            ucBalance: String(data.ucBalance),
+          },
+        };
+      });
+    };
+
+    socket.on('balance:update', handleBalance);
+    return () => { socket.off('balance:update', handleBalance); };
+  }, [state.isAuthenticated]);
+
+  // ─── Cross-tab auth sync via localStorage events ─────────────
+  useEffect(() => {
+    const handleStorage = (e: StorageEvent) => {
+      if (e.key === 'tourneyhub_access_token') {
+        if (!e.newValue) {
+          // Another tab logged out
+          disconnectSocket();
+          setState({ user: null, isLoading: false, isAuthenticated: false });
+        } else if (!state.isAuthenticated && e.newValue) {
+          // Another tab logged in — reload user
+          authApi.me().then(res => {
+            setState({ user: res.user, isLoading: false, isAuthenticated: true });
+            connectSocket(e.newValue!);
+          }).catch(() => {});
+        }
+      }
+    };
+    window.addEventListener('storage', handleStorage);
+    return () => window.removeEventListener('storage', handleStorage);
+  }, [state.isAuthenticated]);
+
+  // ─── Periodic token keep-alive (refresh every 10 min) ────────
+  useEffect(() => {
+    if (!state.isAuthenticated) return;
+    const interval = setInterval(async () => {
+      try {
+        const newTokens = await authApi.refresh();
+        if (newTokens) {
+          // Reconnect socket with fresh token
+          const tokens = getStoredTokens();
+          if (tokens) {
+            disconnectSocket();
+            connectSocket(tokens.accessToken);
+          }
+        }
+      } catch { /* ignore */ }
+    }, 10 * 60 * 1000); // every 10 minutes
+    return () => clearInterval(interval);
+  }, [state.isAuthenticated]);
 
   return (
     <AuthContext.Provider value={{ ...state, login, register, loginWithTelegram, startTelegramAuth, cancelTelegramAuth, telegramAuthStatus, logout, refreshUser, banInfo, clearBan }}>
