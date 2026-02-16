@@ -68,6 +68,17 @@ html, body {
   animation: slide-left 6s linear infinite;
 }
 
+/* Global button press feedback */
+button, a[role="button"], [role="button"] {
+  transition: transform 0.1s ease, opacity 0.15s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+
+button:active:not(:disabled), a[role="button"]:active, [role="button"]:active {
+  transform: scale(0.97);
+  opacity: 0.85;
+}
+
 /* Page loader fade out */
 @keyframes fadeOut {
   from { opacity: 1; }

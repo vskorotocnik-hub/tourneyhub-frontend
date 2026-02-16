@@ -1,9 +1,9 @@
-import { useState, useEffect, useRef, type FormEvent } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useState, useEffect, type FormEvent } from 'react';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { authApi, ApiError } from '../lib/api';
 
-type Step = 'methods' | 'email' | 'code' | 'password';
+type Step = 'methods' | 'email';
 
 const Spinner = () => (
   <svg className="w-5 h-5 animate-spin" viewBox="0 0 24 24" fill="none">
@@ -14,21 +14,20 @@ const Spinner = () => (
 
 const LoginPage = () => {
   const navigate = useNavigate();
+  const location = useLocation();
+  const from = (location.state as { from?: string })?.from || '/';
   const { login, isAuthenticated, startTelegramAuth, cancelTelegramAuth, telegramAuthStatus } = useAuth();
 
   const [step, setStep] = useState<Step>('methods');
   const [email, setEmail] = useState('');
-  const [code, setCode] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [tgWaiting, setTgWaiting] = useState(false);
-  const [countdown, setCountdown] = useState(0);
-  const codeInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    if (isAuthenticated) navigate('/', { replace: true });
+    if (isAuthenticated) navigate(from, { replace: true });
   }, [isAuthenticated, navigate]);
 
   useEffect(() => {
@@ -42,22 +41,16 @@ const LoginPage = () => {
     return () => cancelTelegramAuth();
   }, [cancelTelegramAuth]);
 
-  useEffect(() => {
-    if (countdown <= 0) return;
-    const t = setTimeout(() => setCountdown(c => c - 1), 1000);
-    return () => clearTimeout(t);
-  }, [countdown]);
-
-  useEffect(() => {
-    if (step === 'code') codeInputRef.current?.focus();
-  }, [step]);
+  const [tgDeepLink, setTgDeepLink] = useState('');
 
   const handleTelegramClick = async () => {
     setError('');
     setTgWaiting(true);
     try {
       const deepLink = await startTelegramAuth();
-      window.open(deepLink, '_blank');
+      setTgDeepLink(deepLink);
+      // Use location.href for Safari compatibility (window.open gets blocked after async)
+      window.location.href = deepLink;
     } catch {
       setError('Ошибка подключения к серверу');
       setTgWaiting(false);
@@ -82,42 +75,13 @@ const LoginPage = () => {
     }
   };
 
-  const handleSendCode = async (e: FormEvent) => {
-    e.preventDefault();
-    setError('');
-    setIsLoading(true);
-    try {
-      await authApi.sendCode(email, 'login');
-      setStep('code');
-      setCountdown(60);
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Ошибка подключения');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleVerifyCode = async (e: FormEvent) => {
-    e.preventDefault();
-    setError('');
-    setIsLoading(true);
-    try {
-      await authApi.verifyCode(email, code, 'login');
-      setStep('password');
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Ошибка подключения');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
   const handleLogin = async (e: FormEvent) => {
     e.preventDefault();
     setError('');
     setIsLoading(true);
     try {
       await login(email, password);
-      navigate('/', { replace: true });
+      navigate(from, { replace: true });
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Ошибка подключения');
     } finally {
@@ -125,22 +89,11 @@ const LoginPage = () => {
     }
   };
 
-  const handleResendCode = async () => {
-    if (countdown > 0) return;
-    setError('');
-    try {
-      await authApi.sendCode(email, 'login');
-      setCountdown(60);
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Ошибка подключения');
-    }
-  };
-
   const goBack = () => {
     setError('');
-    if (step === 'code') { setStep('email'); setCode(''); }
-    else if (step === 'password') { setStep('code'); setPassword(''); }
-    else if (step === 'email') { setStep('methods'); setEmail(''); }
+    setStep('methods');
+    setEmail('');
+    setPassword('');
   };
 
   const inputClass = "w-full px-4 py-3 bg-zinc-800 border border-zinc-700 rounded-xl text-white placeholder-zinc-500 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-colors";
@@ -177,7 +130,17 @@ const LoginPage = () => {
                   <p className="text-center text-zinc-400 text-xs">
                     Нажми <b>Start</b> в боте Telegram, затем вернись сюда
                   </p>
-                  <button type="button" onClick={() => { cancelTelegramAuth(); setTgWaiting(false); }} className="w-full py-2 text-sm text-zinc-400 hover:text-white transition-colors">
+                  {tgDeepLink && (
+                    <a
+                      href={tgDeepLink}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="block w-full py-2.5 rounded-xl bg-[#2AABEE]/20 border border-[#2AABEE]/30 text-[#2AABEE] text-sm font-medium text-center hover:bg-[#2AABEE]/30 transition-colors"
+                    >
+                      Открыть Telegram вручную
+                    </a>
+                  )}
+                  <button type="button" onClick={() => { cancelTelegramAuth(); setTgWaiting(false); setTgDeepLink(''); }} className="w-full py-2 text-sm text-zinc-400 hover:text-white transition-colors">
                     Отменить
                   </button>
                 </div>
@@ -217,9 +180,9 @@ const LoginPage = () => {
             </div>
           )}
 
-          {/* ── Step: Enter Email ── */}
+          {/* ── Step: Email + Password ── */}
           {step === 'email' && (
-            <form onSubmit={handleSendCode} className="space-y-4">
+            <form onSubmit={handleLogin} className="space-y-4">
               <button type="button" onClick={goBack} className="text-zinc-400 hover:text-white text-sm flex items-center gap-1 transition-colors">
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" /></svg>
                 Назад
@@ -228,58 +191,6 @@ const LoginPage = () => {
                 <label className="block text-sm font-medium text-white/70 mb-1.5">Email</label>
                 <input type="email" value={email} onChange={e => setEmail(e.target.value)} required placeholder="your@email.com" className={inputClass} autoFocus />
               </div>
-              <button type="submit" disabled={isLoading} className={btnPrimary}>
-                {isLoading ? <><Spinner /> Отправка...</> : 'Отправить код'}
-              </button>
-              <p className="text-zinc-500 text-xs text-center">Мы отправим 6-значный код на вашу почту</p>
-            </form>
-          )}
-
-          {/* ── Step: Enter Code ── */}
-          {step === 'code' && (
-            <form onSubmit={handleVerifyCode} className="space-y-4">
-              <button type="button" onClick={goBack} className="text-zinc-400 hover:text-white text-sm flex items-center gap-1 transition-colors">
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" /></svg>
-                Назад
-              </button>
-              <div>
-                <label className="block text-sm font-medium text-white/70 mb-1.5">Код подтверждения</label>
-                <p className="text-zinc-500 text-xs mb-2">Отправлен на {email}</p>
-                <input
-                  ref={codeInputRef}
-                  type="text"
-                  inputMode="numeric"
-                  maxLength={6}
-                  value={code}
-                  onChange={e => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                  required
-                  placeholder="000000"
-                  className={`${inputClass} text-center text-2xl tracking-[0.5em] font-mono`}
-                />
-              </div>
-              <button type="submit" disabled={isLoading || code.length !== 6} className={btnPrimary}>
-                {isLoading ? <><Spinner /> Проверка...</> : 'Подтвердить'}
-              </button>
-              <div className="text-center">
-                {countdown > 0 ? (
-                  <span className="text-zinc-500 text-sm">Отправить повторно через {countdown}с</span>
-                ) : (
-                  <button type="button" onClick={handleResendCode} className="text-emerald-400 hover:text-emerald-300 text-sm transition-colors">
-                    Отправить код повторно
-                  </button>
-                )}
-              </div>
-            </form>
-          )}
-
-          {/* ── Step: Enter Password ── */}
-          {step === 'password' && (
-            <form onSubmit={handleLogin} className="space-y-4">
-              <button type="button" onClick={goBack} className="text-zinc-400 hover:text-white text-sm flex items-center gap-1 transition-colors">
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" /></svg>
-                Назад
-              </button>
-              <p className="text-zinc-400 text-sm">Вход как <span className="text-white font-medium">{email}</span></p>
               <div>
                 <label className="block text-sm font-medium text-white/70 mb-1.5">Пароль</label>
                 <div className="relative">
@@ -290,7 +201,6 @@ const LoginPage = () => {
                     required
                     placeholder="Введите пароль"
                     className={`${inputClass} pr-12`}
-                    autoFocus
                   />
                   <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-white transition-colors">
                     {showPassword ? (

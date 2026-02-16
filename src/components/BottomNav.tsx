@@ -1,5 +1,7 @@
-import { memo } from 'react';
+import { memo, useState, useEffect, useCallback } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
+import { tournamentApi } from '../lib/api';
 
 type NavIcon = 'home' | 'tasks' | 'friends' | 'sell' | 'messages' | 'profile';
 
@@ -22,6 +24,21 @@ const navItems: NavItemData[] = [
 const BottomNav = memo(() => {
   const location = useLocation();
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const [unreadCount, setUnreadCount] = useState(0);
+
+  const fetchUnread = useCallback(() => {
+    if (!user) return;
+    tournamentApi.unreadCount()
+      .then(r => setUnreadCount(r.unreadCount))
+      .catch(() => {});
+  }, [user]);
+
+  useEffect(() => {
+    fetchUnread();
+    const iv = setInterval(fetchUnread, 15000);
+    return () => clearInterval(iv);
+  }, [fetchUnread]);
 
   const icons: Record<NavIcon, React.ReactNode> = {
     home: (
@@ -67,16 +84,23 @@ const BottomNav = memo(() => {
       <div className="max-w-[1800px] mx-auto px-4">
         <div className="flex items-center justify-around py-2">
           {navItems.map(item => {
-            const isActive = location.pathname === item.path;
+            const isActive = location.pathname === item.path || location.pathname.startsWith(item.path + '/');
             return (
               <button
                 key={item.path}
                 onClick={() => navigate(item.path)}
-                className={`flex flex-col items-center gap-0.5 px-2 py-1 rounded-lg transition-colors
+                className={`relative flex flex-col items-center gap-0.5 px-2 py-1 rounded-lg transition-colors active:scale-95
                           ${isActive ? 'text-purple-400' : 'text-white/50 hover:text-white/70'}
                           ${item.hideOnMobile ? 'hidden md:flex' : ''}`}
               >
-                {icons[item.icon]}
+                <div className="relative">
+                  {icons[item.icon]}
+                  {item.icon === 'messages' && unreadCount > 0 && (
+                    <span className="absolute -top-1.5 -right-2.5 min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 flex items-center justify-center text-[10px] font-bold text-white leading-none">
+                      {unreadCount > 99 ? '99+' : unreadCount}
+                    </span>
+                  )}
+                </div>
                 <span className="text-xs">{item.label}</span>
               </button>
             );

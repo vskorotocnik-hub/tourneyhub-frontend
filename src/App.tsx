@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { BrowserRouter, Routes, Route, useLocation } from 'react-router-dom';
-import { AuthProvider } from './context/AuthContext';
+import { AuthProvider, useAuth } from './context/AuthContext';
+import RequireAuth from './components/RequireAuth';
 import HomePage from './pages/HomePage';
 import LoginPage from './pages/LoginPage';
 import RegisterPage from './pages/RegisterPage';
@@ -24,15 +25,7 @@ import GlobalTournamentsPage from './pages/GlobalTournamentsPage.tsx';
 import TournamentDetailPage from './pages/TournamentDetailPage';
 import BoostPage from './pages/BoostPage';
 import SellPage from './pages/SellPage.tsx';
-import AdminLayout from './pages/admin/AdminLayout';
-import AdminDashboardPage from './pages/admin/DashboardPage';
-import AdminUsersPage from './pages/admin/UsersPage';
-import AdminListingsPage from './pages/admin/ListingsPage';
-import AdminTournamentsPage from './pages/admin/TournamentsPage';
-import AdminFinancesPage from './pages/admin/FinancesPage';
-import AdminSupportPage from './pages/admin/SupportPage';
-import AdminContentPage from './pages/admin/ContentPage';
-import AdminSettingsPage from './pages/admin/SettingsPage';
+import TournamentRoomPage from './pages/TournamentRoomPage';
 import BottomNav from './components/BottomNav';
 import Header from './components/Header';
 import WelcomeModal from './components/WelcomeModal';
@@ -47,11 +40,46 @@ function ScrollToTop() {
   return null;
 }
 
+function BannedScreen({ reason, onBack }: { reason: string; onBack: () => void }) {
+  return (
+    <div className="min-h-screen flex items-center justify-center px-4 bg-zinc-950">
+      <div className="w-full max-w-md bg-zinc-900 border border-red-500/30 rounded-2xl p-8 text-center space-y-5">
+        <div className="w-20 h-20 rounded-full bg-red-500/15 flex items-center justify-center mx-auto">
+          <span className="text-4xl">🚫</span>
+        </div>
+        <div>
+          <h1 className="text-xl font-bold text-white">Аккаунт заблокирован</h1>
+          <p className="text-zinc-500 text-sm mt-1">Ваш аккаунт был заблокирован администратором</p>
+        </div>
+        <div className="bg-red-500/10 border border-red-500/20 rounded-xl px-4 py-3">
+          <p className="text-zinc-400 text-xs mb-1">Причина:</p>
+          <p className="text-red-400 font-medium text-sm">{reason}</p>
+        </div>
+        <div className="bg-zinc-800/50 rounded-xl px-4 py-3 text-left space-y-2">
+          <p className="text-zinc-400 text-sm font-medium">Что делать?</p>
+          <ul className="text-zinc-500 text-xs space-y-1">
+            <li>• Напишите в поддержку для обжалования</li>
+            <li>• Telegram: @tourneyhub_support</li>
+            <li>• Email: support@tourneyhub.com</li>
+          </ul>
+        </div>
+        <button onClick={onBack} className="text-zinc-500 hover:text-zinc-300 text-sm transition-colors">
+          ← Назад
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function AppContent() {
   const location = useLocation();
-  const isAdminPage = location.pathname.startsWith('/admin');
+  const { banInfo, clearBan } = useAuth();
   const isAuthPage = location.pathname === '/login' || location.pathname === '/register' || location.pathname === '/forgot-password' || location.pathname.startsWith('/auth/google');
-  const isFullscreenPage = isAdminPage || isAuthPage || location.pathname === '/clan' || location.pathname.startsWith('/global-tournaments');
+  const isFullscreenPage = isAuthPage || location.pathname === '/clan' || location.pathname.startsWith('/global-tournaments') || location.pathname.startsWith('/tournament/');
+
+  if (banInfo) {
+    return <BannedScreen reason={banInfo.reason} onBack={clearBan} />;
+  }
 
   return (
     <>
@@ -62,39 +90,33 @@ function AppContent() {
       <div className={isFullscreenPage ? '' : 'pt-14'}>
         {/* PageTransition временно отключён */}
         <Routes>
+        {/* ── Public routes ── */}
         <Route path="/" element={<HomePage />} />
         <Route path="/login" element={<LoginPage />} />
         <Route path="/register" element={<RegisterPage />} />
         <Route path="/forgot-password" element={<ForgotPasswordPage />} />
         <Route path="/auth/google/callback" element={<GoogleCallbackPage />} />
-        <Route path="/tasks" element={<TasksPage />} />
-        <Route path="/friends" element={<FriendsPage />} />
-        <Route path="/messages" element={<MessagesPage />} />
-        <Route path="/messages/:chatId" element={<ChatPage />} />
-        <Route path="/profile" element={<ProfilePage />} />
-        <Route path="/game/:gameId" element={<GamePage />} />
-        <Route path="/game/:gameId/currency" element={<CurrencyPage />} />
-        <Route path="/game/:gameId/training" element={<TrainingPage />} />
-        <Route path="/game/:gameId/accounts" element={<AccountsPage />} />
-        <Route path="/game/:gameId/accounts/:accountId" element={<AccountDetailPage />} />
-        <Route path="/game/:gameId/account-rental" element={<AccountRentalPage />} />
-        <Route path="/game/:gameId/account-rental/:accountId" element={<AccountRentalDetailPage />} />
-        <Route path="/game/:gameId/boost" element={<BoostPage />} />
-        <Route path="/sell" element={<SellPage />} />
-        <Route path="/bots" element={<BotsPage />} />
-        <Route path="/clan" element={<ClanPage />} />
         <Route path="/global-tournaments" element={<GlobalTournamentsPage />} />
         <Route path="/global-tournaments/:tournamentId" element={<TournamentDetailPage />} />
-        <Route path="/admin" element={<AdminLayout />}>
-          <Route index element={<AdminDashboardPage />} />
-          <Route path="users" element={<AdminUsersPage />} />
-          <Route path="listings" element={<AdminListingsPage />} />
-          <Route path="tournaments" element={<AdminTournamentsPage />} />
-          <Route path="finances" element={<AdminFinancesPage />} />
-          <Route path="support" element={<AdminSupportPage />} />
-          <Route path="content" element={<AdminContentPage />} />
-          <Route path="settings" element={<AdminSettingsPage />} />
-        </Route>
+        {/* ── Semi-public (can browse, actions require auth via modal) ── */}
+        <Route path="/game/:gameId" element={<GamePage />} />
+        {/* ── Protected routes ── */}
+        <Route path="/tasks" element={<RequireAuth><TasksPage /></RequireAuth>} />
+        <Route path="/friends" element={<RequireAuth><FriendsPage /></RequireAuth>} />
+        <Route path="/messages" element={<RequireAuth><MessagesPage /></RequireAuth>} />
+        <Route path="/messages/:chatId" element={<RequireAuth><ChatPage /></RequireAuth>} />
+        <Route path="/profile" element={<RequireAuth><ProfilePage /></RequireAuth>} />
+        <Route path="/game/:gameId/currency" element={<RequireAuth><CurrencyPage /></RequireAuth>} />
+        <Route path="/game/:gameId/training" element={<RequireAuth><TrainingPage /></RequireAuth>} />
+        <Route path="/game/:gameId/accounts" element={<RequireAuth><AccountsPage /></RequireAuth>} />
+        <Route path="/game/:gameId/accounts/:accountId" element={<RequireAuth><AccountDetailPage /></RequireAuth>} />
+        <Route path="/game/:gameId/account-rental" element={<RequireAuth><AccountRentalPage /></RequireAuth>} />
+        <Route path="/game/:gameId/account-rental/:accountId" element={<RequireAuth><AccountRentalDetailPage /></RequireAuth>} />
+        <Route path="/game/:gameId/boost" element={<RequireAuth><BoostPage /></RequireAuth>} />
+        <Route path="/sell" element={<RequireAuth><SellPage /></RequireAuth>} />
+        <Route path="/bots" element={<RequireAuth><BotsPage /></RequireAuth>} />
+        <Route path="/clan" element={<RequireAuth><ClanPage /></RequireAuth>} />
+        <Route path="/tournament/:tournamentId" element={<RequireAuth><TournamentRoomPage /></RequireAuth>} />
         </Routes>
       </div>
       {!isFullscreenPage && <BottomNav />}

@@ -1,8 +1,11 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import type { GameMode, TeamMode, ServerRegion, ActiveTournament } from '../types';
-import { tournamentLeaders, activeTournaments, serverNames, classicTournaments, classicLeaders, type ClassicTournament, type ClassicMode } from '../data/tournaments';
+import { tournamentLeaders, serverNames, classicTournaments, classicLeaders, type ClassicTournament, type ClassicMode } from '../data/tournaments';
 import { wowMaps, wowActiveMatches, wowLeaders } from '../data/wow';
+import { tournamentApi, type TournamentListItem, type ActiveTournamentData } from '../lib/api';
+import { useAuth } from '../context/AuthContext';
+import AuthPromptModal from '../components/AuthPromptModal';
 
 type ViewState = 'create' | 'searching' | 'found';
 type ActionTab = 'create' | 'join';
@@ -16,8 +19,17 @@ const madaraQuote = {
 const GamePage = () => {
   const navigate = useNavigate();
   const { gameId } = useParams();
+  const { user, isAuthenticated } = useAuth();
   const [activeMode, setActiveMode] = useState<GameMode>('tdm');
+  const [showAuthModal, setShowAuthModal] = useState(false);
   const [showMadaraBubble, setShowMadaraBubble] = useState(false);
+
+  // Real tournament state
+  const [activeTournamentId, setActiveTournamentId] = useState<string | null>(null);
+  const [myActiveTournaments, setMyActiveTournaments] = useState<ActiveTournamentData[]>([]);
+  const [openTournaments, setOpenTournaments] = useState<TournamentListItem[]>([]);
+  const [loadingTournaments, setLoadingTournaments] = useState(false);
+  const [createError, setCreateError] = useState('');
 
   // Auto-close Madara bubble after 9 seconds
   useEffect(() => {
@@ -78,36 +90,111 @@ const GamePage = () => {
   
   // Search state
   const [searchTime, setSearchTime] = useState(0);
-  const [canCancel, setCanCancel] = useState(false);
+  const [canCancel, setCanCancel] = useState(true);
   const [showRulesModal, setShowRulesModal] = useState(false);
   const [foundOpponent, setFoundOpponent] = useState<{username: string, avatar: string} | null>(null);
+  const [teamsJoinedCount, setTeamsJoinedCount] = useState(1); // creator's team is always joined
+  const [allOpponents, setAllOpponents] = useState<{username: string, avatar: string}[]>([]);
 
-  // Timer for search + demo: find opponent after 5 seconds
+  // Poll tournament status while searching
   useEffect(() => {
     let interval: ReturnType<typeof setInterval>;
-    let foundTimeout: ReturnType<typeof setTimeout>;
-    if (viewState === 'searching') {
-      interval = setInterval(() => {
-        setSearchTime(prev => {
-          const newTime = prev + 1;
-          if (newTime >= 30 * 60) setCanCancel(true);
-          return newTime;
-        });
-      }, 1000);
-      // Demo: find opponent after 5 seconds
-      foundTimeout = setTimeout(() => {
-        setFoundOpponent({
-          username: 'ProGamer228',
-          avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=ProGamer228'
-        });
-        setViewState('found');
-      }, 5000);
+    let pollInterval: ReturnType<typeof setInterval>;
+    if (viewState === 'searching' && activeTournamentId) {
+      // Only tick timer while still searching (stop when opponent found)
+      if (!foundOpponent) {
+        interval = setInterval(() => {
+          setSearchTime(prev => prev + 1);
+        }, 1000);
+      }
+      // Poll tournament status every 3 seconds
+      pollInterval = setInterval(async () => {
+        try {
+          const data = await tournamentApi.get(activeTournamentId);
+          // Track how many teams have joined
+          setTeamsJoinedCount(data.teams.length);
+          // Collect ALL opponent teams (even while still SEARCHING — partial fills)
+          const opponentTeams = data.teams.filter(t => t.id !== data.userTeamId);
+          const opponents = opponentTeams
+            .map(t => {
+              const captain = t.players.find(p => p.isCaptain) || t.players[0];
+              return captain ? {
+                username: captain.user.username,
+                avatar: captain.user.avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${captain.user.username}`,
+              } : null;
+            })
+            .filter((o): o is {username: string; avatar: string} => o !== null);
+          setAllOpponents(opponents);
+          // Mark as "found" only when tournament actually started (all teams in)
+          if (data.status === 'IN_PROGRESS' && !foundOpponent && opponents.length > 0) {
+            setFoundOpponent(opponents[0]);
+          }
+          // If tournament was cancelled by someone else, go back
+          if (data.status === 'CANCELLED') {
+            setActiveTournamentId(null);
+            setViewState('create');
+            setFoundOpponent(null);
+            setAllOpponents([]);
+          }
+        } catch {
+          // ignore poll errors
+        }
+      }, 3000);
     }
     return () => {
       clearInterval(interval);
-      clearTimeout(foundTimeout);
+      clearInterval(pollInterval);
     };
-  }, [viewState]);
+  }, [viewState, activeTournamentId, navigate, foundOpponent]);
+
+  // Load open tournaments for Join tab
+  useEffect(() => {
+    if (activeMode === 'tdm' && actionTab === 'join') {
+      setLoadingTournaments(true);
+      tournamentApi.list({ server: server.toUpperCase() })
+        .then(res => setOpenTournaments(res.tournaments))
+        .catch(() => {})
+        .finally(() => setLoadingTournaments(false));
+    }
+  }, [activeMode, actionTab, server]);
+
+  // Load all active tournaments on mount
+  const loadActiveTournaments = useCallback(() => {
+    if (!user) return;
+    tournamentApi.myActive().then(res => {
+      setMyActiveTournaments(res.tournaments || []);
+    }).catch(() => {});
+  }, [user]);
+
+  useEffect(() => {
+    loadActiveTournaments();
+  }, [loadActiveTournaments]);
+
+  // Handler: open searching view for a specific active tournament
+  const handleViewActiveTournament = async (t: ActiveTournamentData) => {
+    setActiveTournamentId(t.id);
+    setBet(t.bet);
+    setTeamMode(t.teamMode === 'DUO' ? 'duo' : 'solo');
+    setTeamCount(t.teamCount);
+    setServer((t.server?.toLowerCase() || 'europe') as ServerRegion);
+    const elapsed = Math.floor((Date.now() - new Date(t.createdAt).getTime()) / 1000);
+    setSearchTime(Math.max(0, elapsed));
+    setViewState('searching');
+    // If already IN_PROGRESS, load opponent data immediately
+    if (t.status === 'IN_PROGRESS') {
+      try {
+        const data = await tournamentApi.get(t.id);
+        const opponentTeam = data.teams.find(team => team.id !== data.userTeamId);
+        if (opponentTeam && opponentTeam.players.length > 0) {
+          const captain = opponentTeam.players.find(p => p.isCaptain) || opponentTeam.players[0];
+          setFoundOpponent({
+            username: captain.user.username,
+            avatar: captain.user.avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${captain.user.username}`,
+          });
+        }
+      } catch { /* ignore */ }
+    }
+  };
 
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -137,7 +224,11 @@ const GamePage = () => {
     return { totalPool, platformFee, netPool, prizes };
   };
 
-  const handleStartSearch = useCallback(() => {
+  const handleStartSearch = useCallback(async () => {
+    if (!isAuthenticated) {
+      setShowAuthModal(true);
+      return;
+    }
     if (!playerId.trim()) {
       setIdError('Введи свой ID!');
       return;
@@ -155,23 +246,82 @@ const GamePage = () => {
       return;
     }
     setIdError('');
-    setSearchTime(0);
-    setCanCancel(false);
-    setViewState('searching');
-  }, [playerId, partnerId, teamMode]);
+    setCreateError('');
 
-  const handleCancelSearch = useCallback(() => {
-    if (canCancel) {
-      setViewState('create');
+    try {
+      const result = await tournamentApi.create({
+        teamMode: teamMode === 'solo' ? 'SOLO' : 'DUO',
+        teamCount,
+        bet,
+        server: server.toUpperCase(),
+        playerId,
+        partnerId: teamMode === 'duo' ? partnerId : undefined,
+      });
+      setActiveTournamentId(result.id);
       setSearchTime(0);
-      setCanCancel(false);
-      setFoundOpponent(null);
+      setCanCancel(true);
+      setViewState('searching');
+      loadActiveTournaments();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Ошибка создания турнира';
+      setCreateError(msg);
     }
-  }, [canCancel]);
+  }, [playerId, partnerId, teamMode, teamCount, bet, server, user, navigate, loadActiveTournaments]);
 
-  const handleJoinTournament = (tournament: ActiveTournament) => {
-    console.log('Joining tournament:', tournament.id);
-    navigate(`/messages/tournament-${tournament.id}`);
+  const handleCancelSearch = useCallback(async () => {
+    if (canCancel && activeTournamentId) {
+      try {
+        await tournamentApi.cancel(activeTournamentId);
+        setActiveTournamentId(null);
+        setViewState('create');
+        setSearchTime(0);
+        setCanCancel(true);
+        setFoundOpponent(null);
+        setAllOpponents([]);
+        setTeamsJoinedCount(1);
+        loadActiveTournaments();
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : 'Ошибка отмены';
+        setCreateError(msg);
+      }
+    }
+  }, [canCancel, activeTournamentId, loadActiveTournaments]);
+
+  const handleJoinTournament = async (tournament: ActiveTournament | TournamentListItem) => {
+    if (!isAuthenticated) {
+      setShowAuthModal(true);
+      return;
+    }
+    if (!playerId.trim() || !validateId(playerId)) {
+      setIdError('Введи свой ID (10 цифр) чтобы вступить');
+      return;
+    }
+    try {
+      const result = await tournamentApi.join(tournament.id, {
+        playerId,
+        partnerId: teamMode === 'duo' ? partnerId : undefined,
+      });
+      setActiveTournamentId(tournament.id);
+      setViewState('searching');
+      setSearchTime(0);
+      if (result.tournamentStarted) {
+        // Load opponent data immediately
+        try {
+          const data = await tournamentApi.get(tournament.id);
+          const opponentTeam = data.teams.find(team => team.id !== data.userTeamId);
+          if (opponentTeam && opponentTeam.players.length > 0) {
+            const captain = opponentTeam.players.find(p => p.isCaptain) || opponentTeam.players[0];
+            setFoundOpponent({
+              username: captain.user.username,
+              avatar: captain.user.avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${captain.user.username}`,
+            });
+          }
+        } catch { /* ignore */ }
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Ошибка вступления';
+      setCreateError(msg);
+    }
   };
 
   const { totalPool, platformFee, prizes } = calculateWinnings();
@@ -190,181 +340,406 @@ const GamePage = () => {
     { id: 'sa', label: '🇧🇷 Ю. Америка' },
   ];
 
-  // ============= FOUND VIEW =============
-  if (viewState === 'found' && foundOpponent) {
-    return (
-      <div className="min-h-screen flex items-center justify-center px-4">
-        <div className="text-center">
-          {/* VS Animation */}
-          <div className="flex items-center justify-center gap-6 mb-8">
-            {/* Your card */}
-            <div className="text-center">
-              <img 
-                src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${playerId}`}
-                alt="You"
-                className="w-20 h-20 rounded-full border-2 border-accent-green mx-auto mb-2"
-              />
-              <p className="text-sm font-semibold text-white">{playerId}</p>
-              <p className="text-xs text-accent-green">Ты</p>
-            </div>
-            
-            {/* VS */}
-            <div className="text-3xl font-bold text-yellow-400 animate-pulse">VS</div>
-            
-            {/* Opponent card */}
-            <div className="text-center">
-              <img 
-                src={foundOpponent.avatar}
-                alt={foundOpponent.username}
-                className="w-20 h-20 rounded-full border-2 border-red-500 mx-auto mb-2"
-              />
-              <p className="text-sm font-semibold text-white">{foundOpponent.username}</p>
-              <p className="text-xs text-red-400">Соперник</p>
-            </div>
-          </div>
-
-          {/* Match info */}
-          <div className="bg-dark-200/60 backdrop-blur-sm rounded-xl border border-white/20 p-4 mb-6">
-            <p className="text-lg font-bold text-accent-green mb-1">🎮 Матч найден!</p>
-            <p className="text-xs text-white/60">TDM • {teamMode === 'solo' ? 'Solo' : 'Duo'} • Ставка {bet} UC</p>
-          </div>
-
-          {/* Go to chat button */}
-          <button
-            onClick={() => navigate('/messages/tournament-new')}
-            className="w-full py-3.5 rounded-xl bg-red-600 
-                     text-white font-semibold hover:opacity-90 transition-opacity"
-          >
-            💬 Перейти в чат матча
-          </button>
-          
-          <p className="text-xs text-white/40 mt-3">
-            ⚠️ Сыграйте в течение 1 часа. Отменить нельзя.
-          </p>
-        </div>
-      </div>
-    );
-  }
-
   // ============= SEARCHING VIEW =============
   if (viewState === 'searching') {
-    const prizes = [
-      { place: 1, label: '🥇 1 место', amount: (totalPool * 0.9).toFixed(0) },
-      { place: 2, label: '🥈 2 место', amount: '0' },
-    ];
-    if (teamCount >= 3) {
-      prizes[1].amount = (totalPool * 0.9 * 0.3).toFixed(0);
-      prizes[0].amount = (totalPool * 0.9 * 0.7).toFixed(0);
-    }
-
     return (
-      <div className="min-h-screen pb-44">
-        <main className="max-w-[1800px] mx-auto px-4 md:px-8 py-4">
-          {/* Header */}
-          <div className="flex items-center relative mb-4 py-1">
-            <button onClick={() => setViewState('create')} className="flex items-center gap-2 text-white/70 hover:text-white">
-              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
-              </svg>
-              <span className="text-sm">TDM • {teamMode === 'solo' ? 'Solo' : 'Duo'} • {bet} UC</span>
-            </button>
-            <h1 className="absolute left-1/2 -translate-x-1/2 text-lg font-bold text-white">🔍 Поиск соперников</h1>
-          </div>
+      <div className="min-h-screen pb-32">
+        {/* ── Mobile version ── */}
+        <div className="md:hidden">
+          <main className="px-4 pt-4 pb-4">
+            {/* Top bar */}
+            <div className="flex items-center justify-between mb-6">
+              <button onClick={() => setViewState('create')} className="flex items-center gap-1.5 text-white/50 hover:text-white transition-colors">
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" /></svg>
+                <span className="text-xs">Назад</span>
+              </button>
+              <span className="text-xs text-white/50 bg-white/5 px-3 py-1.5 rounded-full border border-white/10">
+                TDM • {teamMode === 'solo' ? '1v1' : '2v2'} • {server === 'europe' ? 'EU' : server.toUpperCase()}
+              </span>
+              <span className="text-sm font-mono font-bold text-white/80">{formatTime(searchTime)}</span>
+            </div>
 
-          {/* Action Status Banner */}
-          <div className="bg-red-600/30 rounded-xl border border-red-500/40 p-4 mb-4">
-            <div className="flex items-center justify-between mb-3">
-              <div className="flex items-center gap-2">
-                <div className="relative">
-                  <div className="w-4 h-4 rounded-full bg-yellow-500 animate-ping absolute" />
-                  <div className="w-4 h-4 rounded-full bg-yellow-500 relative" />
+            {/* VS Arena — dynamic: shows N-1 opponent slots */}
+            <div className="relative py-8 mb-6">
+              {/* Pulse ring background */}
+              <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                <div className="w-48 h-48 rounded-full border border-red-500/20 animate-ping" style={{ animationDuration: '3s' }} />
+                <div className="absolute w-36 h-36 rounded-full border border-red-500/10 animate-ping" style={{ animationDuration: '2s' }} />
+              </div>
+
+              <div className="relative z-10 flex items-center justify-center gap-4 flex-wrap">
+                {/* Your avatar */}
+                <div className="flex flex-col items-center gap-2">
+                  <div className="w-16 h-16 rounded-full border-2 border-emerald-500 overflow-hidden bg-emerald-500/20 flex items-center justify-center shadow-lg shadow-emerald-500/20">
+                    {user?.avatar ? (
+                      <img src={user.avatar} alt="" className="w-full h-full object-cover" />
+                    ) : (
+                      <span className="text-2xl">👤</span>
+                    )}
+                  </div>
+                  <span className="text-[10px] text-white font-medium truncate max-w-[70px]">{user?.username || 'Ты'}</span>
+                  <span className="text-[9px] text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full">Готов</span>
                 </div>
-                <span className="text-sm font-semibold text-white">Активный поиск</span>
-              </div>
-              <span className="text-2xl font-mono font-bold text-white">{formatTime(searchTime)}</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="flex-1 h-1.5 bg-white/10 rounded-full overflow-hidden">
-                <div 
-                  className="h-full bg-gradient-to-r from-yellow-400 to-orange-500 rounded-full transition-all duration-1000"
-                  style={{ width: `${Math.min((searchTime / (30 * 60)) * 100, 100)}%` }}
-                />
-              </div>
-              <span className="text-xs text-white/50">{Math.round((searchTime / (30 * 60)) * 100)}%</span>
-            </div>
-          </div>
 
-          {/* Teams Visual */}
-          <div className="bg-dark-200/60 backdrop-blur-sm rounded-xl border border-white/20 p-4 mb-4">
-            <h3 className="text-sm font-semibold text-white mb-3">👥 Команды ({1}/{teamCount})</h3>
-            <div className="space-y-2">
-              {Array.from({ length: teamCount }).map((_, i) => (
-                <div key={i} className={`flex items-center justify-between rounded-lg p-3 transition-all
-                                       ${i === 0 ? 'bg-accent-green/10 border border-accent-green/30' : 'bg-white/5 border border-dashed border-white/10'}`}>
-                  <div className="flex items-center gap-2">
-                    <span className="text-lg">{i === 0 ? '🟢' : '⏳'}</span>
-                    <div>
-                      <p className="text-sm text-white font-medium">
-                        {i === 0 ? `Твоя команда` : `Ожидаем игрока...`}
-                      </p>
-                      <p className="text-xs text-white/40">
-                        {i === 0 ? `ID: ${playerId}${teamMode === 'duo' ? ` + ${partnerId}` : ''}` : 'Слот свободен'}
-                      </p>
+                {/* VS badge */}
+                <div className="flex flex-col items-center">
+                  <div className="w-10 h-10 rounded-full bg-gradient-to-br from-red-600 to-orange-600 flex items-center justify-center shadow-lg shadow-red-500/30">
+                    <span className="text-white font-black text-xs">VS</span>
+                  </div>
+                  <span className="text-sm font-bold text-yellow-400 mt-1">{bet} UC</span>
+                </div>
+
+                {/* Opponent slots — one per opponent team needed */}
+                {Array.from({ length: teamCount - 1 }).map((_, i) => {
+                  const opponent = allOpponents[i];
+                  return (
+                    <div key={i} className="flex flex-col items-center gap-2">
+                      {opponent ? (
+                        <>
+                          <div className="w-16 h-16 rounded-full border-2 border-red-500 overflow-hidden bg-red-500/20 flex items-center justify-center shadow-lg shadow-red-500/20">
+                            <img src={opponent.avatar} alt={opponent.username} className="w-full h-full object-cover" />
+                          </div>
+                          <span className="text-[10px] text-white font-medium truncate max-w-[70px]">{opponent.username}</span>
+                          <span className="text-[9px] text-red-400 bg-red-500/10 px-2 py-0.5 rounded-full">Команда {i + 2}</span>
+                        </>
+                      ) : (
+                        <>
+                          <div className="w-16 h-16 rounded-full border-2 border-dashed border-white/20 bg-white/5 flex items-center justify-center">
+                            <div className="flex gap-1">
+                              <div className="w-1.5 h-1.5 bg-white/40 rounded-full animate-bounce" style={{ animationDelay: `${i * 100}ms` }} />
+                              <div className="w-1.5 h-1.5 bg-white/40 rounded-full animate-bounce" style={{ animationDelay: `${i * 100 + 150}ms` }} />
+                              <div className="w-1.5 h-1.5 bg-white/40 rounded-full animate-bounce" style={{ animationDelay: `${i * 100 + 300}ms` }} />
+                            </div>
+                          </div>
+                          <span className="text-[10px] text-white/40">Поиск...</span>
+                          <span className="text-[9px] text-white/20 bg-white/5 px-2 py-0.5 rounded-full">Команда {i + 2}</span>
+                        </>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Prize distribution */}
+            <div className="bg-gradient-to-r from-yellow-600/10 to-orange-600/10 rounded-2xl border border-yellow-500/20 p-4 mb-4">
+              <div className="flex items-center justify-between mb-3">
+                <p className="text-xs text-white/60">💰 Призы по местам</p>
+                <span className="text-[10px] text-white/40">Пул {totalPool} UC • 10% комиссия</span>
+              </div>
+              <div className={`grid gap-1.5 ${teamCount === 2 ? 'grid-cols-2' : teamCount === 3 ? 'grid-cols-3' : 'grid-cols-4'}`}>
+                {prizes.map((p) => (
+                  <div key={p.place} className={`text-center py-2 rounded-xl ${p.place === 1 ? 'bg-yellow-500/20 border border-yellow-500/30' : 'bg-white/5'}`}>
+                    <p className="text-[10px] text-white/40 mb-0.5">{p.place} место</p>
+                    <p className={`text-sm font-bold ${p.place === 1 ? 'text-yellow-400' : p.place === teamCount ? 'text-red-400' : 'text-white/70'}`}>
+                      {p.amount} UC
+                    </p>
+                    <p className="text-[9px] text-white/30">{p.pct}%</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Status steps */}
+            <div className="space-y-3 mb-4">
+              <div className="flex items-center gap-3 bg-emerald-500/10 border border-emerald-500/20 rounded-xl px-4 py-3">
+                <div className="w-6 h-6 rounded-full bg-emerald-500 flex items-center justify-center shrink-0">
+                  <svg className="w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
+                </div>
+                <span className="text-sm text-white">Турнир создан, ставка списана</span>
+              </div>
+
+              {/* Team join progress for 3-4 teams */}
+              {teamCount > 2 && !foundOpponent && (
+                <div className="flex items-center gap-3 bg-blue-500/10 border border-blue-500/20 rounded-xl px-4 py-3">
+                  <div className="w-6 h-6 rounded-full bg-blue-500 flex items-center justify-center shrink-0">
+                    <span className="text-xs font-bold text-white">{teamsJoinedCount}</span>
+                  </div>
+                  <div className="flex-1">
+                    <span className="text-sm text-white">Команд собралось: {teamsJoinedCount}/{teamCount}</span>
+                    <div className="w-full h-1.5 bg-white/10 rounded-full mt-1.5 overflow-hidden">
+                      <div className="h-full bg-blue-500 rounded-full transition-all" style={{ width: `${(teamsJoinedCount / teamCount) * 100}%` }} />
                     </div>
                   </div>
-                  <span className={`text-xs px-2 py-1 rounded-full ${i === 0 ? 'bg-accent-green/20 text-accent-green' : 'bg-white/10 text-white/40'}`}>
-                    {i === 0 ? '✓ Готов' : '...'}
+                </div>
+              )}
+
+              {foundOpponent ? (
+                <div className="flex items-center gap-3 bg-emerald-500/10 border border-emerald-500/20 rounded-xl px-4 py-3">
+                  <div className="w-6 h-6 rounded-full bg-emerald-500 flex items-center justify-center shrink-0">
+                    <svg className="w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
+                  </div>
+                  <span className="text-sm text-white">
+                    {allOpponents.length > 1 ? `${allOpponents.length} соперника найдено!` : 'Соперник найден!'}
                   </span>
                 </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Prizes */}
-          <div className="bg-gradient-to-r from-yellow-600/20 to-orange-600/20 backdrop-blur-sm rounded-xl border border-yellow-500/30 p-4 mb-4">
-            <h3 className="text-sm font-semibold text-yellow-400 mb-3">🏆 Призы по местам</h3>
-            <div className="flex gap-4">
-              {prizes.map((p) => (
-                <div key={p.place} className="flex-1 text-center">
-                  <p className="text-lg font-bold text-white">{p.amount} UC</p>
-                  <p className="text-xs text-white/50">{p.label}</p>
+              ) : (
+                <div className="flex items-center gap-3 bg-yellow-500/10 border border-yellow-500/20 rounded-xl px-4 py-3">
+                  <div className="relative w-6 h-6 shrink-0">
+                    <div className="absolute inset-0 rounded-full bg-yellow-500/50 animate-ping" />
+                    <div className="relative w-6 h-6 rounded-full bg-yellow-500 flex items-center justify-center">
+                      <span className="text-xs">🔍</span>
+                    </div>
+                  </div>
+                  <span className="text-sm text-white">{teamCount > 2 ? 'Ждём остальные команды...' : 'Ищем достойного соперника...'}</span>
                 </div>
-              ))}
+              )}
+              <button
+                onClick={() => foundOpponent && activeTournamentId && navigate(`/messages/t-${activeTournamentId}`)}
+                className={`flex items-center gap-3 rounded-xl px-4 py-3 w-full text-left transition-all ${
+                  foundOpponent
+                    ? 'bg-purple-500/20 border-2 border-purple-500/50 animate-pulse'
+                    : 'bg-white/5 border border-white/10 opacity-40'
+                }`}
+              >
+                <div className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 ${
+                  foundOpponent ? 'bg-purple-500' : 'bg-white/10'
+                }`}>
+                  <span className="text-xs">💬</span>
+                </div>
+                <span className="text-sm text-white font-medium">Чат матча и игра</span>
+                {foundOpponent && <span className="ml-auto text-xs text-purple-300">Перейти →</span>}
+              </button>
             </div>
-          </div>
 
-          {/* What's Next */}
-          <div className="bg-dark-200/60 backdrop-blur-sm rounded-xl border border-white/20 p-4">
-            <h3 className="text-sm font-semibold text-white mb-2">📋 Что дальше?</h3>
-            <ol className="text-xs text-white/60 space-y-1.5">
-              <li className="flex items-start gap-2">
-                <span className="text-purple-400">1.</span>
-                <span>Соперники найдены → создастся чат турнира</span>
-              </li>
-              <li className="flex items-start gap-2">
-                <span className="text-purple-400">2.</span>
-                <span>В чате договоритесь и начнёте матч</span>
-              </li>
-              <li className="flex items-start gap-2">
-                <span className="text-purple-400">3.</span>
-                <span>Укажите результат → получите выигрыш!</span>
-              </li>
-            </ol>
-          </div>
-        </main>
+            {/* Found message */}
+            {foundOpponent && (
+              <div className="bg-gradient-to-r from-purple-600/20 to-pink-600/20 rounded-xl border border-purple-500/30 p-3 mb-4">
+                <p className="text-sm font-semibold text-white mb-1">
+                  🎮 {allOpponents.length > 1 ? 'Все команды собрались!' : 'Соперник найден!'}
+                </p>
+                {allOpponents.length > 1 && (
+                  <div className="flex flex-wrap gap-2 mb-2">
+                    {allOpponents.map((op, i) => (
+                      <div key={i} className="flex items-center gap-1.5 bg-white/5 rounded-lg px-2 py-1">
+                        <img src={op.avatar} alt="" className="w-5 h-5 rounded-full" />
+                        <span className="text-xs text-white/80">{op.username}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <p className="text-xs text-white/70">Перейдите в <span className="text-purple-300 font-medium">Чат матча</span> — там вся информация для начала игры.</p>
+              </div>
+            )}
+          </main>
 
-        {/* Sticky Cancel Button - above bottom nav */}
-        <div className="fixed bottom-16 left-0 right-0 p-4">
-          <button
-            onClick={handleCancelSearch}
-            disabled={!canCancel}
-            className={`w-full py-3.5 rounded-xl text-sm font-semibold transition-all
-                      ${canCancel 
-                        ? 'bg-red-500/20 border border-red-500/50 text-red-400 hover:bg-red-500/30' 
-                        : 'bg-white/5 border border-white/10 text-white/40 cursor-not-allowed'}`}
-          >
-            {canCancel ? '❌ Отменить поиск' : `🔒 Отмена доступна через ${formatTime(30 * 60 - searchTime)}`}
-          </button>
+          {/* Sticky Bottom Button */}
+          <div className="fixed bottom-16 left-0 right-0 p-4 bg-gradient-to-t from-dark-100 via-dark-100/95 to-transparent pt-8">
+            {foundOpponent ? (
+              <button
+                onClick={() => activeTournamentId && navigate(`/messages/t-${activeTournamentId}`)}
+                className="w-full py-3.5 rounded-xl text-sm font-semibold bg-gradient-to-r from-purple-600 to-pink-600 text-white hover:opacity-90 transition-all active:scale-[0.98]"
+              >
+                💬 Перейти в чат матча
+              </button>
+            ) : (
+              <button
+                onClick={handleCancelSearch}
+                disabled={!canCancel}
+                className="w-full py-3.5 rounded-xl text-sm font-semibold bg-red-500/15 border border-red-500/30 text-red-400 hover:bg-red-500/25 transition-all active:scale-[0.98]"
+              >
+                ❌ Отменить поиск
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* ── Desktop version ── */}
+        <div className="hidden md:block">
+          <main className="max-w-3xl mx-auto px-8 pt-8">
+            {/* Header */}
+            <div className="relative text-center mb-8">
+              <button onClick={() => setViewState('create')} className="absolute left-0 top-1/2 -translate-y-1/2 flex items-center gap-1.5 text-white/50 hover:text-white transition-colors">
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" /></svg>
+                <span className="text-sm">Назад</span>
+              </button>
+              <h1 className="text-2xl font-bold text-white mb-1">{foundOpponent ? '✅ Соперники найдены!' : 'Поиск соперника'}</h1>
+              <p className="text-sm text-white/40">TDM • {teamMode === 'solo' ? '1v1 Solo' : '2v2 Duo'} • {server === 'europe' ? 'Европа' : server} • {bet} UC</p>
+            </div>
+
+            {/* VS Arena — Desktop — dynamic: shows N-1 opponent slots */}
+            <div className="relative py-12 mb-8">
+              {/* Animated rings */}
+              <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                <div className="w-64 h-64 rounded-full border border-red-500/10 animate-ping" style={{ animationDuration: '4s' }} />
+                <div className="absolute w-48 h-48 rounded-full border border-red-500/15 animate-ping" style={{ animationDuration: '2.5s' }} />
+              </div>
+
+              <div className="relative z-10 flex items-center justify-center gap-10 flex-wrap">
+                {/* You */}
+                <div className="flex flex-col items-center gap-3">
+                  <div className="w-24 h-24 rounded-full border-3 border-emerald-500 overflow-hidden bg-emerald-500/20 flex items-center justify-center shadow-xl shadow-emerald-500/20">
+                    {user?.avatar ? (
+                      <img src={user.avatar} alt="" className="w-full h-full object-cover" />
+                    ) : (
+                      <span className="text-4xl">👤</span>
+                    )}
+                  </div>
+                  <div className="text-center">
+                    <p className="text-sm font-semibold text-white">{user?.username || 'Ты'}</p>
+                    <p className="text-xs text-emerald-400">Рейтинг: {user?.rating ?? 1000}</p>
+                  </div>
+                  <span className="text-xs text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-3 py-1 rounded-full">✓ Готов</span>
+                </div>
+
+                {/* VS */}
+                <div className="flex flex-col items-center gap-2">
+                  <div className="w-14 h-14 rounded-full bg-gradient-to-br from-red-600 to-orange-600 flex items-center justify-center shadow-xl shadow-red-500/30 ring-4 ring-red-500/20">
+                    <span className="text-white font-black text-base">VS</span>
+                  </div>
+                  <div className="text-center">
+                    <span className="text-lg font-bold text-yellow-400">{bet} UC</span>
+                    <p className="text-[10px] text-white/30 mt-0.5">ставка</p>
+                  </div>
+                </div>
+
+                {/* Opponent slots */}
+                {Array.from({ length: teamCount - 1 }).map((_, i) => {
+                  const opponent = allOpponents[i];
+                  return (
+                    <div key={i} className="flex flex-col items-center gap-3">
+                      {opponent ? (
+                        <>
+                          <div className="w-24 h-24 rounded-full border-3 border-red-500 overflow-hidden bg-red-500/20 flex items-center justify-center shadow-xl shadow-red-500/20">
+                            <img src={opponent.avatar} alt={opponent.username} className="w-full h-full object-cover" />
+                          </div>
+                          <div className="text-center">
+                            <p className="text-sm font-semibold text-white">{opponent.username}</p>
+                            <p className="text-xs text-red-400">Команда {i + 2}</p>
+                          </div>
+                          <span className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 px-3 py-1 rounded-full">⚔️ Найден</span>
+                        </>
+                      ) : (
+                        <>
+                          <div className="w-24 h-24 rounded-full border-3 border-dashed border-white/20 bg-white/5 flex items-center justify-center">
+                            <div className="flex gap-1.5">
+                              <div className="w-2.5 h-2.5 bg-white/30 rounded-full animate-bounce" style={{ animationDelay: `${i * 100}ms` }} />
+                              <div className="w-2.5 h-2.5 bg-white/30 rounded-full animate-bounce" style={{ animationDelay: `${i * 100 + 200}ms` }} />
+                              <div className="w-2.5 h-2.5 bg-white/30 rounded-full animate-bounce" style={{ animationDelay: `${i * 100 + 400}ms` }} />
+                            </div>
+                          </div>
+                          <div className="text-center">
+                            <p className="text-sm font-semibold text-white/40">Поиск...</p>
+                            <p className="text-xs text-white/20">Команда {i + 2}</p>
+                          </div>
+                          <span className="text-xs text-white/20 bg-white/5 border border-white/10 px-3 py-1 rounded-full">⏳ Ожидание</span>
+                        </>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Timer + Prize distribution row */}
+            <div className="grid grid-cols-2 gap-4 mb-6">
+              <div className="bg-dark-200/60 rounded-2xl border border-white/10 p-5 text-center">
+                <p className="text-xs text-white/40 mb-2">Время поиска</p>
+                <p className="text-3xl font-mono font-bold text-white">{formatTime(searchTime)}</p>
+              </div>
+              <div className="bg-gradient-to-br from-yellow-600/15 to-orange-600/15 rounded-2xl border border-yellow-500/20 p-4">
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-xs text-white/60">💰 Призы по местам</p>
+                  <span className="text-[10px] text-white/40">Пул {totalPool} UC</span>
+                </div>
+                <div className={`grid gap-1 ${teamCount === 2 ? 'grid-cols-2' : teamCount === 3 ? 'grid-cols-3' : 'grid-cols-4'}`}>
+                  {prizes.map((p) => (
+                    <div key={p.place} className={`text-center py-1.5 rounded-lg ${p.place === 1 ? 'bg-yellow-500/20' : 'bg-white/5'}`}>
+                      <p className="text-[10px] text-white/40">{p.place} место</p>
+                      <p className={`text-sm font-bold ${p.place === 1 ? 'text-yellow-400' : p.place === teamCount ? 'text-red-400' : 'text-white/70'}`}>
+                        {p.amount} UC
+                      </p>
+                      <p className="text-[9px] text-white/30">{p.pct}%</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* Steps */}
+            <div className="flex gap-3 mb-6">
+              <div className="flex-1 flex items-center gap-2.5 bg-emerald-500/10 border border-emerald-500/20 rounded-xl px-4 py-3">
+                <div className="w-5 h-5 rounded-full bg-emerald-500 flex items-center justify-center shrink-0">
+                  <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
+                </div>
+                <span className="text-xs text-white">Ставка списана</span>
+              </div>
+              {foundOpponent ? (
+                <div className="flex-1 flex items-center gap-2.5 bg-emerald-500/10 border border-emerald-500/20 rounded-xl px-4 py-3">
+                  <div className="w-5 h-5 rounded-full bg-emerald-500 flex items-center justify-center shrink-0">
+                    <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
+                  </div>
+                  <span className="text-xs text-white">{allOpponents.length > 1 ? `${allOpponents.length} соперника` : 'Соперник найден'}</span>
+                </div>
+              ) : (
+                <div className="flex-1 flex items-center gap-2.5 bg-yellow-500/10 border border-yellow-500/20 rounded-xl px-4 py-3">
+                  <div className="relative w-5 h-5 shrink-0">
+                    <div className="absolute inset-0 rounded-full bg-yellow-500/40 animate-ping" />
+                    <div className="relative w-5 h-5 rounded-full bg-yellow-500 flex items-center justify-center">
+                      <span className="text-[10px]">🔍</span>
+                    </div>
+                  </div>
+                  <span className="text-xs text-white">{teamCount > 2 ? `Команд: ${teamsJoinedCount}/${teamCount}` : 'Ищем соперника'}</span>
+                </div>
+              )}
+              <button
+                onClick={() => foundOpponent && activeTournamentId && navigate(`/messages/t-${activeTournamentId}`)}
+                className={`flex-1 flex items-center gap-2.5 rounded-xl px-4 py-3 transition-all ${
+                  foundOpponent
+                    ? 'bg-purple-500/20 border-2 border-purple-500/50 animate-pulse cursor-pointer'
+                    : 'bg-white/5 border border-white/10 opacity-40 cursor-default'
+                }`}
+              >
+                <div className={`w-5 h-5 rounded-full flex items-center justify-center shrink-0 ${
+                  foundOpponent ? 'bg-purple-500' : 'bg-white/10'
+                }`}>
+                  <span className="text-[10px]">💬</span>
+                </div>
+                <span className="text-xs text-white">Чат и игра</span>
+                {foundOpponent && <span className="ml-auto text-[10px] text-purple-300">→</span>}
+              </button>
+            </div>
+
+            {/* Found message — desktop */}
+            {foundOpponent && (
+              <div className="bg-gradient-to-r from-purple-600/20 to-pink-600/20 rounded-xl border border-purple-500/30 p-4 mb-6 text-center">
+                <p className="text-sm font-semibold text-white mb-1">
+                  🎮 {allOpponents.length > 1 ? 'Все команды собрались!' : 'Соперник найден!'}
+                </p>
+                {allOpponents.length > 1 && (
+                  <div className="flex flex-wrap justify-center gap-2 mb-2">
+                    {allOpponents.map((op, i) => (
+                      <div key={i} className="flex items-center gap-1.5 bg-white/5 rounded-lg px-2.5 py-1">
+                        <img src={op.avatar} alt="" className="w-5 h-5 rounded-full" />
+                        <span className="text-xs text-white/80">{op.username}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <p className="text-xs text-white/70">Перейдите в <span className="text-purple-300 font-medium">Чат матча</span> — там вся информация для начала игры.</p>
+              </div>
+            )}
+
+            {/* Bottom button — desktop */}
+            <div className="flex justify-center">
+              {foundOpponent ? (
+                <button
+                  onClick={() => activeTournamentId && navigate(`/messages/t-${activeTournamentId}`)}
+                  className="px-12 py-3 rounded-xl text-sm font-semibold bg-gradient-to-r from-purple-600 to-pink-600 text-white hover:opacity-90 transition-all"
+                >
+                  💬 Перейти в чат матча
+                </button>
+              ) : (
+                <button
+                  onClick={handleCancelSearch}
+                  disabled={!canCancel}
+                  className="px-12 py-3 rounded-xl text-sm font-semibold bg-red-500/15 border border-red-500/30 text-red-400 hover:bg-red-500/25 transition-all"
+                >
+                  ❌ Отменить поиск
+                </button>
+              )}
+            </div>
+          </main>
         </div>
       </div>
     );
@@ -437,7 +812,7 @@ const GamePage = () => {
             {/* Right - UC Balance */}
             <div className="flex items-center gap-3">
               <div className="flex items-center gap-2 bg-dark-200/80 border border-white/10 rounded-xl px-4 py-2">
-                <span className="text-white font-bold">1,250 UC</span>
+                <span className="text-white font-bold">{user ? `${Number(user.ucBalance).toLocaleString()} UC` : '— UC'}</span>
               </div>
               <button 
                 onClick={() => navigate(`/game/${gameId}/currency`)}
@@ -472,6 +847,43 @@ const GamePage = () => {
           </div>
           
           </div>
+
+        {/* ===== ACTIVE TOURNAMENTS BANNER ===== */}
+        {myActiveTournaments.length > 0 && viewState === 'create' && (
+          <div className="mb-4 space-y-2">
+            {myActiveTournaments.map(t => {
+              const isSearching = t.status === 'SEARCHING';
+              return (
+                <button
+                  key={t.id}
+                  onClick={() => handleViewActiveTournament(t)}
+                  className={`w-full flex items-center gap-3 rounded-xl px-4 py-3 hover:opacity-90 transition-all text-left ${
+                    isSearching
+                      ? 'bg-yellow-500/10 border border-yellow-500/30'
+                      : 'bg-emerald-500/10 border border-emerald-500/30'
+                  }`}
+                >
+                  <div className="relative shrink-0">
+                    <div className={`w-3 h-3 rounded-full animate-pulse ${isSearching ? 'bg-yellow-500' : 'bg-emerald-500'}`} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <span className="text-sm font-semibold text-white">
+                      {isSearching ? '🔍 Идёт поиск...' : '✅ Соперник найден'}
+                    </span>
+                    <div className="flex items-center gap-2 mt-0.5">
+                      <span className="text-xs text-white/50">{t.teamMode === 'SOLO' ? '1 на 1' : '2 на 2'}</span>
+                      <span className="text-xs text-white/30">•</span>
+                      <span className="text-xs text-white/50">{t.teamCount} команд</span>
+                      <span className="text-xs text-white/30">•</span>
+                      <span className="text-xs text-yellow-400">{t.bet} UC</span>
+                    </div>
+                  </div>
+                  <span className={`text-xs font-medium shrink-0 ${isSearching ? 'text-yellow-400' : 'text-emerald-400'}`}>Перейти →</span>
+                </button>
+              );
+            })}
+          </div>
+        )}
 
         {/* ===== ACTION TABS (only for TDM and WoW) ===== */}
         {activeMode !== 'classic' && (
@@ -685,18 +1097,24 @@ const GamePage = () => {
               <div className="mb-4">
                 <p className="text-xs text-white/60 mb-2">🌍 Сервер</p>
                 <div className="flex flex-wrap gap-2">
-                  {servers.map((s) => (
-                    <button
-                      key={s.id}
-                      onClick={() => setServer(s.id)}
-                      className={`px-3 py-1.5 rounded-lg text-xs transition-all
-                                ${server === s.id 
-                                  ? 'bg-red-600/30 text-red-400 border border-red-500/50' 
-                                  : 'bg-white/5 text-white/60 border border-white/10 hover:bg-white/10'}`}
-                    >
-                      {s.label}
-                    </button>
-                  ))}
+                  {servers.map((s) => {
+                    const isAvailable = s.id === 'europe';
+                    return (
+                      <button
+                        key={s.id}
+                        onClick={() => isAvailable && setServer(s.id)}
+                        disabled={!isAvailable}
+                        className={`px-3 py-1.5 rounded-lg text-xs transition-all
+                                  ${!isAvailable
+                                    ? 'bg-white/5 text-white/20 border border-white/5 cursor-not-allowed'
+                                    : server === s.id 
+                                      ? 'bg-red-600/30 text-red-400 border border-red-500/50' 
+                                      : 'bg-white/5 text-white/60 border border-white/10 hover:bg-white/10'}`}
+                      >
+                        {s.label}{!isAvailable && ' (скоро)'}
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
 
@@ -851,7 +1269,7 @@ const GamePage = () => {
               <p className="text-xs text-white/60">💰 Выплаты по местам</p>
               <span className="text-xs text-white/40">Пул {totalPool} UC • Комиссия {platformFee.toFixed(0)} UC (10%)</span>
             </div>
-            <div className="grid grid-cols-4 gap-1">
+            <div className={`grid gap-1 ${teamCount === 2 ? 'grid-cols-2' : teamCount === 3 ? 'grid-cols-3' : 'grid-cols-4'}`}>
               {prizes.map((p) => (
                 <div key={p.place} className={`text-center py-1.5 rounded-lg ${p.place === 1 ? 'bg-yellow-500/20' : 'bg-white/5'}`}>
                   <p className={`text-sm font-bold ${p.place === 1 ? 'text-yellow-400' : p.place === teamCount ? 'text-red-400' : 'text-white/70'}`}>
@@ -1012,31 +1430,10 @@ const GamePage = () => {
             </div>
           </div>
 
-          {/* Rules Modal */}
-          {showRulesModal && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
-              <div className="bg-dark-200 border border-white/20 rounded-2xl p-4 max-w-sm w-full">
-                <div className="flex items-center justify-between mb-3">
-                  <h3 className="text-base font-bold text-white">📋 Правила турнира</h3>
-                  <button onClick={() => setShowRulesModal(false)} className="text-white/50 hover:text-white">
-                    ✕
-                  </button>
-                </div>
-                <div className="space-y-2 text-xs text-white/70">
-                  <p>🚫 <strong className="text-red-400">Запрещено:</strong> читы, эмуляторы, баги</p>
-                  <p>⚠️ При нарушении — <strong className="text-red-400">бан аккаунта</strong> + потеря ставки</p>
-                  <p>📹 Администрация может запросить видео матча</p>
-                  <p>🤝 Споры решаются через поддержку в чате</p>
-                  <p>⏱️ На подачу результата — 30 минут после матча</p>
-                </div>
-                <button 
-                  onClick={() => setShowRulesModal(false)}
-                  className="w-full mt-4 py-2 rounded-lg bg-red-600/30 border border-red-500/50 
-                           text-red-300 text-sm font-medium hover:bg-red-600/40"
-                >
-                  Понятно
-                </button>
-              </div>
+          {/* Error */}
+          {createError && (
+            <div className="bg-red-500/20 border border-red-500/40 rounded-xl p-3 mb-3">
+              <p className="text-red-400 text-sm">{createError}</p>
             </div>
           )}
 
@@ -1054,27 +1451,60 @@ const GamePage = () => {
         {/* ===== JOIN TOURNAMENT SECTION ===== */}
         {activeMode === 'tdm' && actionTab === 'join' && (
         <div className="mb-4">
+          {/* Player ID input for joining */}
+          <div className="bg-dark-200/60 backdrop-blur-sm rounded-xl border border-white/20 p-3 mb-3">
+            <label className="text-xs text-white/50 mb-1.5 block">Твой PUBG ID (10 цифр)</label>
+            <input
+              type="text"
+              inputMode="numeric"
+              maxLength={10}
+              value={playerId}
+              onChange={e => { setPlayerId(e.target.value.replace(/\D/g, '')); setIdError(''); }}
+              placeholder="Введи свой ID чтобы вступить"
+              className={`w-full bg-dark-100/80 border rounded-lg px-3 py-2 text-sm text-white placeholder-white/30 outline-none transition-colors
+                        ${idError ? 'border-red-500/50' : 'border-white/10 focus:border-red-500/50'}`}
+            />
+            {idError && <p className="text-red-400 text-xs mt-1">{idError}</p>}
+          </div>
+
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-base font-bold text-white">⚡ Доступные турниры</h2>
-            <span className="text-xs text-white/40">{activeTournaments.length} активных</span>
+            <span className="text-xs text-white/40">{openTournaments.length} активных</span>
           </div>
-          
+
+          {createError && (
+            <div className="bg-red-500/20 border border-red-500/40 rounded-xl p-3 mb-3">
+              <p className="text-red-400 text-sm">{createError}</p>
+            </div>
+          )}
+
+          {loadingTournaments ? (
+            <div className="text-center py-8">
+              <div className="w-8 h-8 border-2 border-white/20 border-t-red-500 rounded-full animate-spin mx-auto mb-2" />
+              <p className="text-white/40 text-sm">Загрузка...</p>
+            </div>
+          ) : openTournaments.length === 0 ? (
+            <div className="text-center py-12">
+              <p className="text-white/40">Нет доступных турниров</p>
+              <p className="text-xs text-white/30 mt-1">Создай свой!</p>
+            </div>
+          ) : (
           <div className="space-y-2">
-            {activeTournaments.map((t) => (
+            {openTournaments.map((t) => (
               <div 
                 key={t.id} 
                 className="bg-dark-200/60 backdrop-blur-sm rounded-xl border border-white/20 p-3"
               >
                 <div className="flex items-center gap-3 mb-2">
                   <img 
-                    src={t.creatorAvatar} 
-                    alt={t.creatorName}
+                    src={t.creator?.avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${t.creator?.username || 'user'}`}
+                    alt={t.creator?.username || 'Игрок'}
                     className="w-10 h-10 rounded-full border border-white/20"
                   />
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-semibold text-white truncate">{t.creatorName}</p>
+                    <p className="text-sm font-semibold text-white truncate">{t.creator?.username || 'Игрок'}</p>
                     <p className="text-xs text-white/40">
-                      {t.teamMode === 'solo' ? 'Solo' : 'Duo'} • {t.teamCount} команды • {serverNames[t.server]}
+                      {t.teamMode === 'SOLO' ? 'Solo' : 'Duo'} • {t.teamCount} команды • {serverNames[t.server.toLowerCase() as ServerRegion] || t.server}
                     </p>
                   </div>
                   <div className="text-right">
@@ -1086,18 +1516,18 @@ const GamePage = () => {
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <div className="flex -space-x-2">
-                      {Array.from({ length: t.playersJoined }).map((_, i) => (
+                      {Array.from({ length: t.teamsJoined }).map((_, i) => (
                         <div key={i} className="w-6 h-6 rounded-full bg-red-500/50 border-2 border-dark-200 flex items-center justify-center text-xs">
                           👤
                         </div>
                       ))}
-                      {Array.from({ length: t.playersNeeded - t.playersJoined }).map((_, i) => (
+                      {Array.from({ length: t.teamCount - t.teamsJoined }).map((_, i) => (
                         <div key={i} className="w-6 h-6 rounded-full bg-white/10 border-2 border-dark-200 flex items-center justify-center text-xs text-white/30">
                           ?
                         </div>
                       ))}
                     </div>
-                    <span className="text-xs text-white/50">{t.playersJoined}/{t.playersNeeded}</span>
+                    <span className="text-xs text-white/50">{t.teamsJoined}/{t.teamCount} команд</span>
                   </div>
                   <button
                     onClick={() => handleJoinTournament(t)}
@@ -1110,6 +1540,7 @@ const GamePage = () => {
               </div>
             ))}
           </div>
+          )}
 
           <p className="text-xs text-white/30 text-center mt-3">
             💡 После вступления отключиться можно только через 1 час
@@ -1276,7 +1707,7 @@ const GamePage = () => {
             {/* Right - UC Balance */}
             <div className="flex items-center gap-2">
               <div className="flex items-center bg-dark-200/80 border border-white/10 rounded-lg px-3 py-1.5">
-                <span className="text-white text-sm font-bold">1,250 UC</span>
+                <span className="text-white text-sm font-bold">{user ? `${Number(user.ucBalance).toLocaleString()} UC` : '— UC'}</span>
               </div>
               <button 
                 onClick={() => navigate(`/game/${gameId}/currency`)}
@@ -1303,6 +1734,41 @@ const GamePage = () => {
               </button>
             ))}
           </div>
+
+          {/* ===== ACTIVE TOURNAMENTS BANNER (mobile) ===== */}
+          {myActiveTournaments.length > 0 && viewState === 'create' && (
+            <div className="mb-3 space-y-2">
+              {myActiveTournaments.map(t => {
+                const isSearching = t.status === 'SEARCHING';
+                return (
+                  <button
+                    key={t.id}
+                    onClick={() => handleViewActiveTournament(t)}
+                    className={`w-full flex items-center gap-3 rounded-xl px-3 py-2.5 hover:opacity-90 transition-all text-left ${
+                      isSearching
+                        ? 'bg-yellow-500/10 border border-yellow-500/30'
+                        : 'bg-emerald-500/10 border border-emerald-500/30'
+                    }`}
+                  >
+                    <div className={`w-2.5 h-2.5 rounded-full animate-pulse shrink-0 ${isSearching ? 'bg-yellow-500' : 'bg-emerald-500'}`} />
+                    <div className="flex-1 min-w-0">
+                      <span className="text-sm font-semibold text-white">
+                        {isSearching ? '🔍 Идёт поиск...' : '✅ Соперник найден'}
+                      </span>
+                      <div className="flex items-center gap-1.5 mt-0.5">
+                        <span className="text-[10px] text-white/50">{t.teamMode === 'SOLO' ? '1 на 1' : '2 на 2'}</span>
+                        <span className="text-[10px] text-white/30">•</span>
+                        <span className="text-[10px] text-white/50">{t.teamCount} команд</span>
+                        <span className="text-[10px] text-white/30">•</span>
+                        <span className="text-[10px] text-yellow-400">{t.bet} UC</span>
+                      </div>
+                    </div>
+                    <span className={`text-xs font-medium shrink-0 ${isSearching ? 'text-yellow-400' : 'text-emerald-400'}`}>→</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
 
           {/* Action Tabs - Создать / Вступить */}
           {activeMode !== 'classic' && (
@@ -1338,7 +1804,7 @@ const GamePage = () => {
                 <p className="text-xs text-white/60">💰 Выплаты по местам</p>
                 <span className="text-xs text-white/40">Пул {totalPool} UC • Комиссия {platformFee.toFixed(0)} UC (10%)</span>
               </div>
-              <div className="grid grid-cols-4 gap-1">
+              <div className={`grid gap-1 ${teamCount === 2 ? 'grid-cols-2' : teamCount === 3 ? 'grid-cols-3' : 'grid-cols-4'}`}>
                 {prizes.map((p) => (
                   <div key={p.place} className={`text-center py-1.5 rounded-lg ${p.place === 1 ? 'bg-yellow-500/20' : 'bg-white/5'}`}>
                     <p className={`text-sm font-bold ${p.place === 1 ? 'text-yellow-400' : p.place === teamCount ? 'text-red-400' : 'text-white/70'}`}>
@@ -1458,6 +1924,7 @@ const GamePage = () => {
               <div className="mb-2">
                 <input
                   type="text"
+                  inputMode="numeric"
                   value={playerId}
                   onChange={(e) => { setPlayerId(e.target.value.replace(/\D/g, '')); setIdError(''); }}
                   placeholder="Твой ID (10 цифр)"
@@ -1471,6 +1938,7 @@ const GamePage = () => {
                 <div>
                   <input
                     type="text"
+                    inputMode="numeric"
                     value={partnerId}
                     onChange={(e) => { setPartnerId(e.target.value.replace(/\D/g, '')); setIdError(''); }}
                     placeholder="ID напарника (10 цифр)"
@@ -1498,6 +1966,13 @@ const GamePage = () => {
               </div>
             </div>
 
+            {/* Error */}
+            {createError && (
+              <div className="bg-red-500/20 border border-red-500/40 rounded-xl p-3 mb-3">
+                <p className="text-red-400 text-sm">{createError}</p>
+              </div>
+            )}
+
             {/* Create Button */}
             <button
               onClick={handleStartSearch}
@@ -1511,38 +1986,113 @@ const GamePage = () => {
 
           {/* ===== TDM JOIN SECTION (Mobile) ===== */}
           {activeMode === 'tdm' && actionTab === 'join' && (
-            <div className="space-y-3">
-              {activeTournaments.length === 0 ? (
-                <div className="text-center py-12">
-                  <p className="text-white/40">Нет активных матчей</p>
-                  <p className="text-xs text-white/30 mt-1">Создай свой!</p>
-                </div>
-              ) : (
-                activeTournaments.map((t) => (
-                  <div key={t.id} className="bg-dark-200/60 backdrop-blur-sm rounded-xl border border-white/20 p-3">
-                    <div className="flex items-center gap-3 mb-2">
-                      <img src={t.creatorAvatar} alt="" className="w-10 h-10 rounded-full" />
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-white">{t.creatorName}</p>
-                        <p className="text-xs text-white/50">{t.teamMode === 'solo' ? 'Solo' : 'Duo'} • {t.teamCount} команд</p>
-                      </div>
-                      <span className="text-lg font-bold text-accent-green">{t.bet} UC</span>
+          <div className="mb-4">
+            {/* Player ID input for joining */}
+            <div className="bg-dark-200/60 backdrop-blur-sm rounded-xl border border-white/20 p-3 mb-3">
+              <label className="text-xs text-white/50 mb-1.5 block">Твой PUBG ID (10 цифр)</label>
+              <input
+                type="text"
+                inputMode="numeric"
+                maxLength={10}
+                value={playerId}
+                onChange={e => { setPlayerId(e.target.value.replace(/\D/g, '')); setIdError(''); }}
+                placeholder="Введи свой ID чтобы вступить"
+                className={`w-full bg-dark-100/80 border rounded-lg px-3 py-2 text-sm text-white placeholder-white/30 outline-none transition-colors
+                          ${idError ? 'border-red-500/50' : 'border-white/10 focus:border-red-500/50'}`}
+              />
+              {teamMode === 'duo' && (
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  maxLength={10}
+                  value={partnerId}
+                  onChange={e => { setPartnerId(e.target.value.replace(/\D/g, '')); setIdError(''); }}
+                  placeholder="ID напарника (10 цифр)"
+                  className="w-full mt-2 bg-dark-100/80 border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder-white/30 outline-none focus:border-red-500/50"
+                />
+              )}
+              {idError && <p className="text-red-400 text-xs mt-1">{idError}</p>}
+            </div>
+
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-base font-bold text-white">⚡ Доступные турниры</h2>
+              <span className="text-xs text-white/40">{openTournaments.length} активных</span>
+            </div>
+
+            {createError && (
+              <div className="bg-red-500/20 border border-red-500/40 rounded-xl p-3 mb-3">
+                <p className="text-red-400 text-sm">{createError}</p>
+              </div>
+            )}
+
+            {loadingTournaments ? (
+              <div className="text-center py-8">
+                <div className="w-8 h-8 border-2 border-white/20 border-t-red-500 rounded-full animate-spin mx-auto mb-2" />
+                <p className="text-white/40 text-sm">Загрузка...</p>
+              </div>
+            ) : openTournaments.length === 0 ? (
+              <div className="text-center py-12">
+                <p className="text-white/40">Нет доступных турниров</p>
+                <p className="text-xs text-white/30 mt-1">Создай свой!</p>
+              </div>
+            ) : (
+            <div className="space-y-2">
+              {openTournaments.map((t) => (
+                <div 
+                  key={t.id} 
+                  className="bg-dark-200/60 backdrop-blur-sm rounded-xl border border-white/20 p-3"
+                >
+                  <div className="flex items-center gap-3 mb-2">
+                    <img 
+                      src={t.creator?.avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${t.creator?.username || 'user'}`}
+                      alt={t.creator?.username || 'Игрок'}
+                      className="w-10 h-10 rounded-full border border-white/20"
+                    />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-white truncate">{t.creator?.username || 'Игрок'}</p>
+                      <p className="text-xs text-white/40">
+                        {t.teamMode === 'SOLO' ? 'Solo' : 'Duo'} • {t.teamCount} команды • {serverNames[t.server.toLowerCase() as ServerRegion] || t.server}
+                      </p>
                     </div>
-                    <div className="flex items-center justify-between text-xs text-white/50 mb-3">
-                      <span>{serverNames[t.server]}</span>
-                      <span>{t.playersJoined}/{t.playersNeeded} игроков</span>
+                    <div className="text-right">
+                      <p className="text-lg font-bold text-accent-green">{t.bet} UC</p>
+                      <p className="text-xs text-white/40">ставка</p>
+                    </div>
+                  </div>
+                  
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <div className="flex -space-x-2">
+                        {Array.from({ length: t.teamsJoined }).map((_, i) => (
+                          <div key={i} className="w-6 h-6 rounded-full bg-red-500/50 border-2 border-dark-200 flex items-center justify-center text-xs">
+                            👤
+                          </div>
+                        ))}
+                        {Array.from({ length: t.teamCount - t.teamsJoined }).map((_, i) => (
+                          <div key={i} className="w-6 h-6 rounded-full bg-white/10 border-2 border-dark-200 flex items-center justify-center text-xs text-white/30">
+                            ?
+                          </div>
+                        ))}
+                      </div>
+                      <span className="text-xs text-white/50">{t.teamsJoined}/{t.teamCount} команд</span>
                     </div>
                     <button
-                      onClick={() => navigate(`/messages/tdm-${t.id}`)}
-                      className="w-full py-2.5 rounded-xl bg-red-600/20 border border-red-500/50 
-                               text-red-400 text-sm font-semibold hover:bg-red-600/30"
+                      onClick={() => handleJoinTournament(t)}
+                      className="px-4 py-1.5 rounded-lg bg-accent-green/20 border border-accent-green/50 
+                               text-accent-green text-xs font-semibold hover:bg-accent-green/30 transition-colors"
                     >
-                      ⚡ Вступить
+                      Вступить
                     </button>
                   </div>
-                ))
-              )}
+                </div>
+              ))}
             </div>
+            )}
+
+            <p className="text-xs text-white/30 text-center mt-3">
+              💡 После вступления отключиться можно только через 1 час
+            </p>
+          </div>
           )}
 
           {/* ===== WOW MODE CONTENT (Mobile) ===== */}
@@ -1848,6 +2398,33 @@ const GamePage = () => {
           )}
         </main>
       </div>
+      {/* ===== RULES MODAL (shared desktop + mobile) ===== */}
+      {showRulesModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
+          <div className="bg-dark-200 border border-white/20 rounded-2xl p-4 max-w-sm w-full">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-base font-bold text-white">📋 Правила турнира</h3>
+              <button onClick={() => setShowRulesModal(false)} className="text-white/50 hover:text-white">
+                ✕
+              </button>
+            </div>
+            <div className="space-y-2 text-xs text-white/70">
+              <p>🚫 <strong className="text-red-400">Запрещено:</strong> читы, эмуляторы, баги</p>
+              <p>⚠️ При нарушении — <strong className="text-red-400">бан аккаунта</strong> + потеря ставки</p>
+              <p>📹 Администрация может запросить видео матча</p>
+              <p>🤝 Споры решаются через поддержку в чате</p>
+              <p>⏱️ На подачу результата — 30 минут после матча</p>
+            </div>
+            <button 
+              onClick={() => setShowRulesModal(false)}
+              className="w-full mt-4 py-2 rounded-lg bg-red-600/30 border border-red-500/50 
+                       text-red-300 text-sm font-medium hover:bg-red-600/40"
+            >
+              Понятно
+            </button>
+          </div>
+        </div>
+      )}
       {/* ===== CLASSIC REGISTRATION MODAL (shared desktop + mobile) ===== */}
       {showClassicRegistration && selectedClassicTournament && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -1917,6 +2494,12 @@ const GamePage = () => {
           </div>
         </div>
       )}
+      {/* ===== AUTH PROMPT MODAL ===== */}
+      <AuthPromptModal
+        isOpen={showAuthModal}
+        onClose={() => setShowAuthModal(false)}
+        message="Войдите или зарегистрируйтесь, чтобы создать или присоединиться к турниру"
+      />
     </div>
   );
 };

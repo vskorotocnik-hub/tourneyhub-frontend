@@ -35,7 +35,13 @@ const PageLoader = () => {
 
   useEffect(() => {
     if (prevPath.current === pathname) return;
+    const prev = prevPath.current;
     prevPath.current = pathname;
+
+    // Skip animation for same-section navigation (e.g. /messages <-> /messages/:chatId)
+    const prevSection = prev.split('/').filter(Boolean)[0];
+    const newSection = pathname.split('/').filter(Boolean)[0];
+    if (prevSection && newSection && prevSection === newSection) return;
 
     // Cancel any running animation
     cleanup();

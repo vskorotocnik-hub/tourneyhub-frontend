@@ -3,10 +3,11 @@ import type { ChatMessage } from '../types';
 
 interface MessageBubbleProps {
   message: ChatMessage;
+  currentUserId?: string;
 }
 
-const MessageBubble = memo(({ message }: MessageBubbleProps) => {
-  const isMe = message.senderId === 'me';
+const MessageBubble = memo(({ message, currentUserId }: MessageBubbleProps) => {
+  const isMe = currentUserId ? message.senderId === currentUserId : message.senderId === 'me';
   const isSystem = message.type === 'system';
   const isAdmin = message.type === 'admin';
   const isSupport = message.type === 'support';
@@ -32,14 +33,14 @@ const MessageBubble = memo(({ message }: MessageBubbleProps) => {
   if (isAdmin || message.isRule) {
     return (
       <div className="flex justify-start my-2">
-        <div className="bg-gradient-to-r from-purple-600/30 to-pink-600/30 backdrop-blur-sm 
-                      rounded-2xl rounded-tl-md px-4 py-3 max-w-[85%] border border-purple-500/30">
+        <div className="bg-gradient-to-r from-yellow-600/20 to-amber-600/20 backdrop-blur-sm 
+                      rounded-2xl rounded-tl-md px-4 py-3 max-w-[85%] border border-yellow-500/30">
           <div className="flex items-center gap-2 mb-1">
             <span className="text-lg">👑</span>
-            <span className="text-xs font-semibold text-purple-400">{message.senderName}</span>
+            <span className="text-xs font-semibold text-yellow-400">Администратор</span>
           </div>
           <p className="text-sm text-white whitespace-pre-line">{message.content}</p>
-          <p className="text-xs text-white/40 mt-2">{formatTime(message.timestamp)}</p>
+          <p className="text-xs text-yellow-400/40 mt-2">{formatTime(message.timestamp)}</p>
         </div>
       </div>
     );
@@ -69,7 +70,11 @@ const MessageBubble = memo(({ message }: MessageBubbleProps) => {
       <div className="flex justify-end my-2">
         <div className="bg-gradient-to-r from-purple-600 to-pink-600 
                       rounded-2xl rounded-tr-md px-4 py-2 max-w-[75%]">
-          <p className="text-sm text-white">{message.content}</p>
+          {message.imageUrl && (
+            <img src={message.imageUrl} alt="" className="rounded-lg max-w-full max-h-60 mb-1.5 cursor-pointer" 
+                 onClick={() => window.open(message.imageUrl, '_blank')} />
+          )}
+          {message.content && <p className="text-sm text-white">{message.content}</p>}
           <p className="text-xs text-white/60 mt-1 text-right">{formatTime(message.timestamp)}</p>
         </div>
       </div>
@@ -89,7 +94,11 @@ const MessageBubble = memo(({ message }: MessageBubbleProps) => {
         <div className="bg-dark-200/80 backdrop-blur-sm rounded-2xl rounded-tl-md px-4 py-2 
                       border border-white/10">
           <p className="text-xs font-semibold text-white/70 mb-1">{message.senderName}</p>
-          <p className="text-sm text-white">{message.content}</p>
+          {message.imageUrl && (
+            <img src={message.imageUrl} alt="" className="rounded-lg max-w-full max-h-60 mb-1.5 cursor-pointer" 
+                 onClick={() => window.open(message.imageUrl, '_blank')} />
+          )}
+          {message.content && <p className="text-sm text-white">{message.content}</p>}
           <p className="text-xs text-white/40 mt-1">{formatTime(message.timestamp)}</p>
         </div>
       </div>

@@ -14,6 +14,7 @@ export interface ChatMessage {
   senderName: string;
   senderAvatar?: string;
   content: string;
+  imageUrl?: string;
   timestamp: Date;
   isRule?: boolean;
 }
@@ -32,4 +33,5 @@ export interface Chat {
   gameId?: string;
   matchResult?: MatchResult;
   isResultSubmitted?: boolean;
+  tournamentStatus?: string;
 }

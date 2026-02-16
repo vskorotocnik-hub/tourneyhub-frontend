@@ -1,5 +1,8 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
+import { tournamentApi } from '../lib/api';
+import type { TournamentHistoryItem } from '../lib/api';
 
 // ============ TYPES ============
 type ProfileTab = 'my_items' | 'purchases' | 'sales' | 'tournaments' | 'clan';
@@ -53,19 +56,6 @@ interface Sale {
   ucAmount?: number;
 }
 
-interface Tournament {
-  id: string;
-  name: string;
-  game: string;
-  mode: string;
-  date: Date;
-  status: 'active' | 'completed';
-  result?: 'win' | 'loss';
-  place?: number;
-  prize?: number;
-  ratingChange?: number;
-  bet: number;
-}
 
 interface ClanMatch {
   id: string;
@@ -153,18 +143,6 @@ const mySales: Sale[] = [
   { id: 's10', title: 'Аккаунт Ace S16', description: 'K/D 5.2, 600+ игр', price: 180, buyer: 'TopPlayer', date: new Date('2024-12-07'), status: 'completed', category: 'account', image: 'https://images.unsplash.com/photo-1493711662062-fa541f7f764e?w=400', collectionLevel: 85 },
 ];
 
-const myTournaments: Tournament[] = [
-  { id: 'tr1', name: 'TDM Championship', game: 'PUBG Mobile', mode: 'TDM 4x4', date: new Date('2024-12-25'), status: 'active', bet: 20 },
-  { id: 'tr2', name: 'WoW Battle', game: 'PUBG Mobile', mode: 'WoW', date: new Date('2024-12-19'), status: 'completed', result: 'win', place: 1, prize: 18, ratingChange: 25, bet: 10 },
-  { id: 'tr3', name: 'Classic Solo', game: 'PUBG Mobile', mode: 'Classic', date: new Date('2024-12-17'), status: 'completed', result: 'loss', place: 3, ratingChange: -10, bet: 5 },
-  { id: 'tr4', name: 'Duo Masters', game: 'PUBG Mobile', mode: 'Classic Duo', date: new Date('2024-12-15'), status: 'completed', result: 'win', place: 2, prize: 8, ratingChange: 15, bet: 5 },
-  { id: 'tr5', name: 'Night Cup TDM', game: 'PUBG Mobile', mode: 'TDM 4x4', date: new Date('2024-12-28'), status: 'active', bet: 15 },
-  { id: 'tr6', name: 'Squad Clash', game: 'PUBG Mobile', mode: 'Classic Squad', date: new Date('2024-12-14'), status: 'completed', result: 'win', place: 1, prize: 40, ratingChange: 35, bet: 20 },
-  { id: 'tr7', name: 'Solo Showdown', game: 'PUBG Mobile', mode: 'Classic', date: new Date('2024-12-13'), status: 'completed', result: 'loss', place: 5, ratingChange: -5, bet: 10 },
-  { id: 'tr8', name: 'WoW Weekend', game: 'PUBG Mobile', mode: 'WoW', date: new Date('2024-12-30'), status: 'active', bet: 25 },
-  { id: 'tr9', name: 'TDM Pro League', game: 'PUBG Mobile', mode: 'TDM 4x4', date: new Date('2024-12-12'), status: 'completed', result: 'win', place: 2, prize: 12, ratingChange: 20, bet: 10 },
-  { id: 'tr10', name: 'Duo Arena', game: 'PUBG Mobile', mode: 'Classic Duo', date: new Date('2024-12-11'), status: 'completed', result: 'loss', place: 4, ratingChange: -8, bet: 5 },
-];
 
 const clanMatches: ClanMatch[] = [
   { id: 'cm1', opponent: 'Phoenix Squad', opponentLogo: 'https://api.dicebear.com/7.x/shapes/svg?seed=Phoenix', date: new Date('2024-12-26'), status: 'active' },
@@ -182,6 +160,7 @@ const clanMatches: ClanMatch[] = [
 // ============ COMPONENT ============
 const ProfilePage = () => {
   const navigate = useNavigate();
+  const { logout, user } = useAuth();
   const [activeTab, setActiveTab] = useState<ProfileTab>('my_items');
   const [tournamentFilter, setTournamentFilter] = useState<TournamentFilter>('active');
   const [clanMatchFilter, setClanMatchFilter] = useState<ClanMatchFilter>('active');
@@ -190,6 +169,25 @@ const ProfilePage = () => {
   const [itemFilter, setItemFilter] = useState<ItemFilter>('active');
   const [purchaseFilter, setPurchaseFilter] = useState<ItemFilter>('active');
   const [saleFilter, setSaleFilter] = useState<ItemFilter>('active');
+
+  // Real tournament history from API
+  const [realTournaments, setRealTournaments] = useState<TournamentHistoryItem[]>([]);
+  const [tournamentsLoading, setTournamentsLoading] = useState(false);
+
+  useEffect(() => {
+    if (activeTab === 'tournaments') {
+      setTournamentsLoading(true);
+      tournamentApi.myHistory()
+        .then(data => setRealTournaments(data.tournaments))
+        .catch(() => {})
+        .finally(() => setTournamentsLoading(false));
+    }
+  }, [activeTab]);
+
+  const filteredRealTournaments = realTournaments.filter(t => {
+    if (tournamentFilter === 'active') return t.status === 'SEARCHING' || t.status === 'IN_PROGRESS' || t.status === 'DISPUTED';
+    return t.status === 'COMPLETED' || t.status === 'CANCELLED';
+  });
 
   const formatDate = (date: Date) => {
     return new Intl.DateTimeFormat('ru-RU', {
@@ -219,7 +217,6 @@ const ProfilePage = () => {
     { id: 'clan' as ProfileTab, label: userClan ? `Клан • ${userClan.name}` : 'Клан', icon: '⚔️' },
   ];
 
-  const filteredTournaments = myTournaments.filter(t => t.status === tournamentFilter);
   const filteredClanMatches = clanMatches.filter(m => m.status === clanMatchFilter);
   const filteredProducts = myProducts.filter(p => itemFilter === 'active' ? p.status === 'active' : p.status !== 'active');
   const filteredPurchases = myPurchases.filter(p => purchaseFilter === 'active' ? p.status === 'pending' : p.status === 'completed');
@@ -249,16 +246,16 @@ const ProfilePage = () => {
               <div className="flex items-center gap-4 mb-4">
                 <div className="relative">
                   <img 
-                    src={userProfile.avatar} 
-                    alt={userProfile.username}
+                    src={user?.avatar || userProfile.avatar} 
+                    alt={user?.username || userProfile.username}
                     className="w-16 h-16 rounded-full border-2 border-purple-500"
                   />
                   <span className="absolute bottom-0 right-0 w-4 h-4 bg-green-500 border-2 border-slate-800 rounded-full" />
                 </div>
                 <div className="flex-1">
-                  <h1 className="text-lg font-bold text-white">{userProfile.username}</h1>
+                  <h1 className="text-lg font-bold text-white">{user?.username || userProfile.username}</h1>
                   <div className="flex items-center gap-2 text-sm">
-                    <span className="text-purple-400">🏆 {userProfile.rating}</span>
+                    <span className="text-purple-400">🏆 {user?.rating ?? userProfile.rating}</span>
                     <span className="text-white/30">•</span>
                     <span className="text-white/40">с {formatDate(userProfile.registeredAt)}</span>
                   </div>
@@ -277,11 +274,11 @@ const ProfilePage = () => {
               <div className="grid grid-cols-2 gap-2 mb-3">
                 <div className="bg-slate-900/50 rounded-xl p-3 text-center">
                   <p className="text-xs text-white/40 mb-1">💵 Баланс</p>
-                  <p className="text-lg font-bold text-green-400">${userProfile.balance.toFixed(2)}</p>
+                  <p className="text-lg font-bold text-green-400">${user ? Number(user.balance).toFixed(2) : userProfile.balance.toFixed(2)}</p>
                 </div>
                 <div className="bg-slate-900/50 rounded-xl p-3 text-center">
                   <p className="text-xs text-white/40 mb-1">🎮 UC</p>
-                  <p className="text-lg font-bold text-yellow-400">{userProfile.gameBalance}</p>
+                  <p className="text-lg font-bold text-yellow-400">{user ? Number(user.ucBalance).toLocaleString() : 0} UC</p>
                 </div>
               </div>
               
@@ -598,28 +595,73 @@ const ProfilePage = () => {
                 <button onClick={() => setTournamentFilter('active')} className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${tournamentFilter === 'active' ? 'bg-blue-600 text-white' : 'bg-slate-800 text-white/50 hover:text-white'}`}>Активные</button>
                 <button onClick={() => setTournamentFilter('completed')} className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${tournamentFilter === 'completed' ? 'bg-slate-600 text-white' : 'bg-slate-800 text-white/50 hover:text-white'}`}>Завершённые</button>
               </div>
-              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
-                {filteredTournaments.length > 0 ? filteredTournaments.map((t) => (
-                  <div key={t.id} className="bg-slate-800/50 rounded-xl p-3 border border-slate-700/50 aspect-square flex flex-col items-center justify-center text-center">
-                    <span className="text-2xl mb-1">🏆</span>
-                    <p className="text-xs font-semibold text-white truncate w-full">{t.name}</p>
-                    <p className="text-xs text-white/40">{t.mode}</p>
-                    <p className="text-xs text-white/30 mb-1">{formatDate(t.date)}</p>
-                    {t.status === 'active' ? (
-                      <span className="px-2 py-0.5 bg-blue-500/20 text-blue-400 text-xs rounded">Активный</span>
-                    ) : (
-                      <span className={`px-2 py-0.5 rounded text-xs font-medium ${t.result === 'win' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
-                        {t.result === 'win' ? `${t.place} место` : `${t.place} место`}
-                      </span>
-                    )}
-                  </div>
-                )) : (
-                  <div className="col-span-full text-center py-12">
-                    <p className="text-3xl mb-2">🏆</p>
-                    <p className="text-white/40 text-sm">Нет турниров</p>
-                  </div>
-                )}
-              </div>
+              {tournamentsLoading ? (
+                <div className="text-center py-12">
+                  <p className="text-white/40 text-sm">⏳ Загрузка...</p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {filteredRealTournaments.length > 0 ? filteredRealTournaments.map((t) => {
+                    const opponentNames = t.opponents.map(o => o.username).join(', ') || '???';
+                    const statusLabel = t.status === 'SEARCHING' ? 'Поиск' : t.status === 'IN_PROGRESS' ? 'В процессе' : t.status === 'DISPUTED' ? 'Спор' : t.status === 'CANCELLED' ? 'Отменён' : 'Завершён';
+                    const isActive = t.status === 'SEARCHING' || t.status === 'IN_PROGRESS' || t.status === 'DISPUTED';
+                    const borderColor = t.result === 'win' ? 'border-emerald-500/30' : t.result === 'loss' ? 'border-red-500/30' : t.status === 'DISPUTED' ? 'border-yellow-500/30' : 'border-slate-700/50';
+
+                    return (
+                      <div
+                        key={t.id}
+                        onClick={() => navigate(`/messages/t-${t.id}`)}
+                        className={`bg-slate-800/50 rounded-xl p-4 border ${borderColor} cursor-pointer hover:bg-slate-800/70 transition-all active:scale-[0.99]`}
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 mb-1">
+                              <span className="text-sm font-semibold text-white">TDM {t.teamMode === 'SOLO' ? '1 на 1' : '2 на 2'}</span>
+                              {isActive ? (
+                                <span className={`px-2 py-0.5 text-[10px] rounded-full font-medium ${
+                                  t.status === 'DISPUTED' ? 'bg-red-500/20 text-red-400' :
+                                  t.status === 'SEARCHING' ? 'bg-blue-500/20 text-blue-400' :
+                                  'bg-yellow-500/20 text-yellow-400'
+                                }`}>{statusLabel}</span>
+                              ) : t.result ? (
+                                <span className={`px-2 py-0.5 text-[10px] rounded-full font-medium ${
+                                  t.result === 'win' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'
+                                }`}>{t.result === 'win' ? '🏆 Победа' : 'Поражение'}</span>
+                              ) : (
+                                <span className="px-2 py-0.5 bg-zinc-500/20 text-zinc-400 text-[10px] rounded-full">{statusLabel}</span>
+                              )}
+                            </div>
+                            <p className="text-xs text-white/50 truncate">vs {opponentNames}</p>
+                          </div>
+                          <div className="text-right shrink-0">
+                            <p className="text-xs text-white/30">{formatDate(new Date(t.createdAt))}</p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-3 mt-2 pt-2 border-t border-white/5">
+                          <div className="flex items-center gap-1">
+                            <span className="text-[10px] text-white/40">Ставка:</span>
+                            <span className="text-xs text-yellow-400 font-medium">{t.bet} UC</span>
+                          </div>
+                          <div className="flex items-center gap-1">
+                            <span className="text-[10px] text-white/40">Приз:</span>
+                            <span className="text-xs text-emerald-400 font-medium">{t.prizePool} UC</span>
+                          </div>
+                          <div className="flex items-center gap-1">
+                            <span className="text-[10px] text-white/40">Команд:</span>
+                            <span className="text-xs text-white/60">{t.teamCount}</span>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  }) : (
+                    <div className="text-center py-12">
+                      <p className="text-3xl mb-2">🏆</p>
+                      <p className="text-white/40 text-sm">Нет турниров</p>
+                      <p className="text-white/30 text-xs mt-1">Создайте TDM матч на странице игры</p>
+                    </div>
+                  )}
+                </div>
+              )}
             </>
           )}
 
@@ -796,7 +838,12 @@ const ProfilePage = () => {
                 </div>
               </div>
               <button className="w-full py-3 bg-purple-600 text-white font-semibold rounded-xl hover:bg-purple-500 transition-colors">Сохранить изменения</button>
-              <button className="w-full py-3 text-red-400 text-sm hover:text-red-300 transition-colors">Выйти из аккаунта</button>
+              <button
+                onClick={async () => { await logout(); setShowSettings(false); navigate('/', { replace: true }); }}
+                className="w-full py-3 text-red-400 text-sm hover:text-red-300 transition-colors"
+              >
+                Выйти из аккаунта
+              </button>
             </div>
           </div>
         </div>

@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useEffect, useCallback, useRef, type ReactNode } from 'react';
-import { authApi, storeTokens, clearTokens, getStoredTokens, type AuthUser } from '../lib/api';
+import { authApi, storeTokens, clearTokens, getStoredTokens, ApiError, type AuthUser } from '../lib/api';
+import { connectSocket, disconnectSocket } from '../lib/socket';
 
 interface AuthState {
   user: AuthUser | null;
@@ -16,6 +17,8 @@ interface AuthContextType extends AuthState {
   telegramAuthStatus: 'idle' | 'waiting' | 'completed' | 'expired' | 'error';
   logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
+  banInfo: { reason: string } | null;
+  clearBan: () => void;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -26,6 +29,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     isLoading: true,
     isAuthenticated: false,
   });
+  const [banInfo, setBanInfo] = useState<{ reason: string } | null>(null);
+  const clearBan = useCallback(() => { setBanInfo(null); }, []);
 
   // Load user on mount if tokens exist
   useEffect(() => {
@@ -35,8 +40,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         .me()
         .then((res) => {
           setState({ user: res.user, isLoading: false, isAuthenticated: true });
+          // Connect Socket.IO with access token
+          connectSocket(tokens.accessToken);
         })
-        .catch(() => {
+        .catch((err) => {
+          if (err instanceof ApiError && err.message === 'BANNED') {
+            setBanInfo({ reason: err.reason || 'Нарушение правил платформы' });
+          }
           clearTokens();
           setState({ user: null, isLoading: false, isAuthenticated: false });
         });
@@ -50,6 +60,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     storeTokens({ accessToken: res.accessToken, refreshToken: res.refreshToken });
     const me = await authApi.me();
     setState({ user: me.user, isLoading: false, isAuthenticated: true });
+    connectSocket(res.accessToken);
   }, []);
 
   const register = useCallback(async (email: string, password: string, username: string) => {
@@ -57,6 +68,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     storeTokens({ accessToken: res.accessToken, refreshToken: res.refreshToken });
     const me = await authApi.me();
     setState({ user: me.user, isLoading: false, isAuthenticated: true });
+    connectSocket(res.accessToken);
   }, []);
 
   const loginWithTelegram = useCallback(async (data: Record<string, unknown>) => {
@@ -64,6 +76,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     storeTokens({ accessToken: res.accessToken, refreshToken: res.refreshToken });
     const me = await authApi.me();
     setState({ user: me.user, isLoading: false, isAuthenticated: true });
+    connectSocket(res.accessToken);
   }, []);
 
   // ─── Bot-based Telegram Auth (native app) ──────────────────
@@ -96,12 +109,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           storeTokens({ accessToken: result.accessToken, refreshToken: result.refreshToken });
           const me = await authApi.me();
           setState({ user: me.user, isLoading: false, isAuthenticated: true });
+          connectSocket(result.accessToken);
         } else if (result.status === 'expired' || result.status === 'not_found') {
           cancelTelegramAuth();
           setTelegramAuthStatus('expired');
         }
-      } catch {
-        // Ignore polling errors, keep trying
+      } catch (err) {
+        if (err instanceof ApiError && err.message === 'BANNED') {
+          cancelTelegramAuth();
+          setTelegramAuthStatus('error');
+          setBanInfo({ reason: err.reason || 'Нарушение правил платформы' });
+        }
       }
     }, 2000);
 
@@ -124,6 +142,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch {
       // Ignore logout errors
     } finally {
+      disconnectSocket();
       clearTokens();
       setState({ user: null, isLoading: false, isAuthenticated: false });
     }
@@ -139,7 +158,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-    <AuthContext.Provider value={{ ...state, login, register, loginWithTelegram, startTelegramAuth, cancelTelegramAuth, telegramAuthStatus, logout, refreshUser }}>
+    <AuthContext.Provider value={{ ...state, login, register, loginWithTelegram, startTelegramAuth, cancelTelegramAuth, telegramAuthStatus, logout, refreshUser, banInfo, clearBan }}>
       {children}
     </AuthContext.Provider>
   );

@@ -103,6 +103,9 @@ const Header = () => {
             <div className="w-20 h-8 rounded-lg bg-zinc-700 animate-pulse" />
           ) : isAuthenticated && user ? (
             <>
+              {/* Authenticated Desktop: Language (left of balance) */}
+              {languageDropdown('hidden md:block')}
+
               {/* Authenticated: Balance + Currency */}
               <div className="relative flex items-center" ref={currencyRef}>
                 <span className="text-white font-semibold text-sm mr-1">{balance.toFixed(2)}</span>
@@ -149,9 +152,6 @@ const Header = () => {
               <button className="px-2 sm:px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs sm:text-sm font-semibold transition-colors">
                 Пополнить
               </button>
-
-              {/* Authenticated Desktop: Language */}
-              {languageDropdown('hidden md:block')}
             </>
           ) : (
             <>
