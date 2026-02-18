@@ -12,6 +12,11 @@ const prisma = new PrismaClient();
 // All admin routes require ADMIN role
 router.use(requireAdmin);
 
+// Debug: test endpoint
+router.get('/ping', (_req: Request, res: Response) => {
+  res.json({ ok: true, ts: Date.now() });
+});
+
 // ─── STATS ──────────────────────────────────────────────────
 
 router.get('/stats', async (_req: Request, res: Response) => {
