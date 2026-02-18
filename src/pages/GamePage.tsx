@@ -77,7 +77,7 @@ const GamePage = () => {
   const [selectedMap, setSelectedMap] = useState<WoWMapItem | null>(null);
   const [wowOpenTournaments, setWowOpenTournaments] = useState<WoWTournamentListItem[]>([]);
   const [wowExtraIds, setWowExtraIds] = useState<string[]>([]);
-  const [wowLoading, setWowLoading] = useState(false);
+  const [_wowLoading, setWowLoading] = useState(false);
   const [joiningWoW, setJoiningWoW] = useState<WoWTournamentListItem | null>(null);
   const [wowJoinIds, setWowJoinIds] = useState<string[]>([]);
   const [wowJoinError, setWowJoinError] = useState('');
@@ -1280,7 +1280,7 @@ const GamePage = () => {
                     />
                     <p className="text-xs text-zinc-400 mt-1">{playerId.length}/10 цифр</p>
                   </div>
-                  {selectedMap?.playersPerTeam >= 2 && (
+                  {(selectedMap?.playersPerTeam ?? 0) >= 2 && (
                     <div>
                       <input
                         type="text"
@@ -2512,7 +2512,7 @@ const GamePage = () => {
                       />
                       <p className="text-xs text-zinc-400 mt-1">{playerId.length}/10 цифр</p>
                     </div>
-                    {selectedMap?.playersPerTeam >= 2 && (
+                    {(selectedMap?.playersPerTeam ?? 0) >= 2 && (
                       <div>
                         <input
                           type="text"
