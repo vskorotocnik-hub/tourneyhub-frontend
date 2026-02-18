@@ -486,6 +486,8 @@ export interface WoWMapItem {
   playersPerTeam: number;
   rounds: number;
   rules: string | null;
+  rating: number;
+  gamesPlayed: number;
   prizeDistribution: string | null;
 }
 

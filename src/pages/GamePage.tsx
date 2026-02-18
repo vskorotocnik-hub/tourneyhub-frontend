@@ -1118,14 +1118,18 @@ const GamePage = () => {
                                 ? 'border-red-500 ring-2 ring-red-500/30' 
                                 : 'border-white/10 hover:border-white/30'}`}
                   >
-                    <div className="relative h-[86px] sm:h-[94px] md:h-[100px]">
+                    <div className="relative h-[100px] sm:h-[110px] md:h-[120px]">
                       <img src={map.image} alt={map.name} className="w-full h-full object-cover" />
                       <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent" />
-                      <div className="absolute top-2 left-2 bg-black/60 backdrop-blur-sm px-1.5 py-0.5 rounded text-[9px] text-white/80 font-mono">
+                      <div className="absolute top-1.5 right-1.5 bg-black/50 backdrop-blur-sm px-1.5 py-0.5 rounded text-[9px] text-white/70 font-mono">
                         ID: {map.mapId}
                       </div>
-                      <div className="absolute bottom-2 left-2 bg-red-600/80 backdrop-blur-sm px-2 py-0.5 rounded text-xs text-white font-medium">
-                        Арена
+                      <div className="absolute bottom-1.5 left-1.5 bg-blue-600/80 backdrop-blur-sm px-2 py-0.5 rounded text-[10px] text-white font-semibold">
+                        {map.format}
+                      </div>
+                      <div className="absolute bottom-1.5 right-1.5 flex items-center gap-1.5">
+                        <span className="text-[10px] text-yellow-300 font-medium">★ {(map.rating || 0).toFixed(1)}</span>
+                        <span className="text-[10px] text-green-400 font-medium">{map.gamesPlayed >= 1000 ? ((map.gamesPlayed / 1000).toFixed(map.gamesPlayed >= 10000 ? 0 : 1) + ' K') : (map.gamesPlayed || 0)}</span>
                       </div>
                     </div>
                     <div className="bg-dark-200/90 p-2">
@@ -2419,17 +2423,27 @@ const GamePage = () => {
                     <div
                       key={map.id}
                       onClick={() => setSelectedMap(map)}
-                      className={`flex-shrink-0 w-40 cursor-pointer rounded-xl overflow-hidden border-2 transition-all
+                      className={`flex-shrink-0 w-44 cursor-pointer rounded-xl overflow-hidden border-2 transition-all
                                 ${selectedMap?.id === map.id 
                                   ? 'border-red-500 ring-2 ring-red-500/30' 
                                   : 'border-white/10'}`}
                     >
-                      <div className="relative h-20">
+                      <div className="relative h-24">
                         <img src={map.image} alt={map.name} className="w-full h-full object-cover" />
-                        <div className="absolute inset-0 bg-gradient-to-t from-black/80 to-transparent" />
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent" />
+                        <div className="absolute top-1 right-1 bg-black/50 backdrop-blur-sm px-1 py-0.5 rounded text-[8px] text-white/70 font-mono">
+                          ID: {map.mapId}
+                        </div>
+                        <div className="absolute bottom-1 left-1 bg-blue-600/80 backdrop-blur-sm px-1.5 py-0.5 rounded text-[9px] text-white font-semibold">
+                          {map.format}
+                        </div>
+                        <div className="absolute bottom-1 right-1 flex items-center gap-1">
+                          <span className="text-[9px] text-yellow-300 font-medium">★ {(map.rating || 0).toFixed(1)}</span>
+                          <span className="text-[9px] text-green-400 font-medium">{map.gamesPlayed >= 1000 ? ((map.gamesPlayed / 1000).toFixed(1) + 'K') : (map.gamesPlayed || 0)}</span>
+                        </div>
                       </div>
                       <div className="bg-dark-200/90 p-2">
-                        <p className="text-xs text-white font-medium truncate">{map.name}</p>
+                        <p className="text-[11px] text-white font-medium truncate">{map.name}</p>
                       </div>
                     </div>
                   ))}

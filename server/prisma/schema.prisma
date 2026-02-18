@@ -300,12 +300,14 @@ model WoWMap {
   id              String       @id @default(cuid())
   mapId           String       @unique  // in-game map ID (e.g. "847291")
   name            String
-  image           String       // URL to map image
-  format          String       // e.g. "1v1", "2v2", "3v3", "4v4", "2v2v2v2"
+  image           String       // URL to map image (uploaded to Supabase)
+  format          String       // e.g. "Арена", "Перестрелка"
   teamCount       Int          // number of teams
   playersPerTeam  Int          // players per team
   rounds          Int          // number of rounds
   rules           String?      // rule description
+  rating          Float        @default(0)   // map rating (e.g. 4.5)
+  gamesPlayed     Int          @default(0)   // total games played on this map
   isActive        Boolean      @default(true)
   createdAt       DateTime     @default(now())
   updatedAt       DateTime     @updatedAt

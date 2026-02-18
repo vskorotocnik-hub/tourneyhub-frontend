@@ -4,6 +4,7 @@ import { requireAdmin } from '../middleware/auth';
 import { z } from 'zod';
 import { completeTournament, resolveMatch } from './tournaments';
 import { emitNewMessage, emitTournamentUpdate } from '../lib/socket';
+import { uploadImage } from '../lib/supabase';
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -670,14 +671,17 @@ router.post('/support/conversations/:userId/reply', async (req: Request, res: Re
 const wowMapSchema = z.object({
   mapId: z.string().min(1).max(20),
   name: z.string().min(1).max(100),
-  image: z.string().url(),
+  image: z.string().optional(),            // URL (existing) or empty for upload
+  imageData: z.string().optional(),         // base64 image data for upload
   format: z.string().min(1).max(20),
   teamCount: z.number().int().min(2).max(8),
   playersPerTeam: z.number().int().min(1).max(4),
   rounds: z.number().int().min(1).max(100),
   rules: z.string().optional(),
+  rating: z.number().min(0).max(5).optional(),
+  gamesPlayed: z.number().int().min(0).optional(),
   isActive: z.boolean().optional(),
-  prizeDistribution: z.string().optional(), // JSON array string
+  prizeDistribution: z.string().optional(),
 });
 
 // List all WoW maps
@@ -703,7 +707,14 @@ router.post('/wow-maps', async (req: Request, res: Response) => {
       res.status(409).json({ error: 'Карта с таким ID уже существует' });
       return;
     }
-    const map = await prisma.woWMap.create({ data });
+    // Handle image upload
+    let imageUrl = data.image || '';
+    if (data.imageData) {
+      imageUrl = await uploadImage(data.imageData, 'wow-maps');
+    }
+    if (!imageUrl) { res.status(400).json({ error: 'Нужно загрузить изображение' }); return; }
+    const { imageData: _, ...rest } = data;
+    const map = await prisma.woWMap.create({ data: { ...rest, image: imageUrl } });
     res.status(201).json(map);
   } catch (err) {
     if (err instanceof z.ZodError) { res.status(400).json({ error: 'Неверные данные', details: err.flatten().fieldErrors }); return; }
@@ -717,7 +728,13 @@ router.put('/wow-maps/:id', async (req: Request, res: Response) => {
   try {
     const id = req.params.id as string;
     const data = wowMapSchema.partial().parse(req.body);
-    const map = await prisma.woWMap.update({ where: { id }, data });
+    // Handle image upload on update
+    let updateData: any = { ...data };
+    if (data.imageData) {
+      updateData.image = await uploadImage(data.imageData, 'wow-maps');
+    }
+    delete updateData.imageData;
+    const map = await prisma.woWMap.update({ where: { id }, data: updateData });
     res.json(map);
   } catch (err) {
     if (err instanceof z.ZodError) { res.status(400).json({ error: 'Неверные данные' }); return; }

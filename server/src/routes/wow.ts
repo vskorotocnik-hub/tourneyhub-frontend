@@ -109,7 +109,8 @@ router.get('/open', async (req: Request, res: Response) => {
           wowMap: t.wowMap ? {
             id: t.wowMap.id, mapId: t.wowMap.mapId, name: t.wowMap.name, image: t.wowMap.image,
             format: t.wowMap.format, teamCount: t.wowMap.teamCount, playersPerTeam: t.wowMap.playersPerTeam,
-            rounds: t.wowMap.rounds, rules: t.wowMap.rules, prizeDistribution: t.wowMap.prizeDistribution,
+            rounds: t.wowMap.rounds, rules: t.wowMap.rules, rating: t.wowMap.rating,
+            gamesPlayed: t.wowMap.gamesPlayed, prizeDistribution: t.wowMap.prizeDistribution,
           } : null,
         };
       }),

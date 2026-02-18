@@ -337,6 +337,8 @@ export interface WoWMapAdmin {
   playersPerTeam: number;
   rounds: number;
   rules: string | null;
+  rating: number;
+  gamesPlayed: number;
   isActive: boolean;
   prizeDistribution: string | null;
   createdAt: string;
@@ -346,9 +348,9 @@ export interface WoWMapAdmin {
 
 export const wowMapApi = {
   list: () => apiFetch<{ maps: WoWMapAdmin[] }>('/api/admin/wow-maps'),
-  create: (data: Omit<WoWMapAdmin, 'id' | 'createdAt' | 'updatedAt' | '_count'>) =>
+  create: (data: Record<string, unknown>) =>
     apiFetch<WoWMapAdmin>('/api/admin/wow-maps', { method: 'POST', body: data }),
-  update: (id: string, data: Partial<WoWMapAdmin>) =>
+  update: (id: string, data: Record<string, unknown>) =>
     apiFetch<WoWMapAdmin>(`/api/admin/wow-maps/${id}`, { method: 'PUT', body: data }),
   remove: (id: string) =>
     apiFetch<{ deleted?: boolean; deactivated?: boolean }>(`/api/admin/wow-maps/${id}`, { method: 'DELETE' }),
