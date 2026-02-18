@@ -1,4 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
+import https from 'https';
+import { URL } from 'url';
 
 const supabaseUrl = process.env.SUPABASE_URL || '';
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_KEY || '';
@@ -13,8 +15,38 @@ const ALLOWED_FORMATS = ['jpeg', 'jpg', 'png', 'webp'];
 console.log(`[Supabase] URL configured: ${supabaseUrl ? 'YES (' + supabaseUrl.substring(0, 30) + '...)' : 'NO — MISSING!'}`);
 console.log(`[Supabase] Service key configured: ${supabaseServiceKey ? 'YES' : 'NO — MISSING!'}`);
 
+/** Upload buffer via Node.js https module (bypasses undici/fetch issues) */
+function httpsUpload(uploadUrl: string, buffer: Buffer, contentType: string, serviceKey: string): Promise<{ status: number; body: string }> {
+  return new Promise((resolve, reject) => {
+    const parsed = new URL(uploadUrl);
+    const options: https.RequestOptions = {
+      hostname: parsed.hostname,
+      port: 443,
+      path: parsed.pathname,
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${serviceKey}`,
+        'Content-Type': contentType,
+        'Content-Length': buffer.length,
+        'x-upsert': 'false',
+      },
+    };
+
+    const req = https.request(options, (res) => {
+      let body = '';
+      res.on('data', (chunk) => { body += chunk; });
+      res.on('end', () => resolve({ status: res.statusCode || 0, body }));
+    });
+
+    req.on('error', (err) => reject(err));
+    req.setTimeout(30000, () => { req.destroy(new Error('Upload timeout 30s')); });
+    req.write(buffer);
+    req.end();
+  });
+}
+
 /**
- * Upload a base64 image to Supabase Storage via direct REST API.
+ * Upload a base64 image to Supabase Storage via Node.js https module.
  * Returns the public URL of the uploaded image.
  * Max size: 5 MB. Allowed formats: jpg, png, webp.
  */
@@ -41,34 +73,24 @@ export async function uploadImage(base64Data: string, folder: string = 'messages
 
   const fileName = `${folder}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
   const contentType = `image/${match[1]}`;
-
-  // Upload via direct REST API instead of Supabase JS client for reliability
   const uploadUrl = `${supabaseUrl}/storage/v1/object/${BUCKET_NAME}/${fileName}`;
 
   let lastError = '';
   for (let attempt = 1; attempt <= 3; attempt++) {
     try {
-      const res = await fetch(uploadUrl, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${supabaseServiceKey}`,
-          'Content-Type': contentType,
-          'x-upsert': 'false',
-        },
-        body: buffer,
-      });
+      const res = await httpsUpload(uploadUrl, buffer, contentType, supabaseServiceKey);
+      console.log(`Upload attempt ${attempt}: status=${res.status} body=${res.body.substring(0, 200)}`);
 
-      if (res.ok) {
+      if (res.status >= 200 && res.status < 300) {
         const publicUrl = `${supabaseUrl}/storage/v1/object/public/${BUCKET_NAME}/${fileName}`;
         return publicUrl;
       }
 
-      const errBody = await res.text().catch(() => 'no body');
-      lastError = `HTTP ${res.status}: ${errBody}`;
+      lastError = `HTTP ${res.status}: ${res.body.substring(0, 300)}`;
       console.error(`Upload attempt ${attempt}/3 failed: ${lastError}`);
     } catch (err: any) {
-      lastError = `${err?.name || 'Error'}: ${err?.message || err}`;
-      console.error(`Upload attempt ${attempt}/3 fetch error: ${lastError}`);
+      lastError = `${err?.code || err?.name || 'Error'}: ${err?.message || err}`;
+      console.error(`Upload attempt ${attempt}/3 error: ${lastError}`, err?.code, err?.syscall, err?.hostname);
     }
 
     if (attempt < 3) {
