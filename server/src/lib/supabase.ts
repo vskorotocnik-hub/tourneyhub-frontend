@@ -32,16 +32,30 @@ export async function uploadImage(base64Data: string, folder: string = 'messages
   }
 
   const fileName = `${folder}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+  const contentType = `image/${match[1]}`;
 
-  const { error } = await supabase.storage
-    .from(BUCKET_NAME)
-    .upload(fileName, buffer, {
-      contentType: `image/${match[1]}`,
-      upsert: false,
-    });
+  // Use Uint8Array for better compatibility with Supabase client + Node.js 20
+  const uint8 = new Uint8Array(buffer);
 
-  if (error) throw new Error(`Upload failed: ${error.message}`);
+  // Retry up to 3 times on transient fetch errors
+  let lastError: string = '';
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    const { error } = await supabase.storage
+      .from(BUCKET_NAME)
+      .upload(fileName, uint8, { contentType, upsert: false });
 
-  const { data } = supabase.storage.from(BUCKET_NAME).getPublicUrl(fileName);
-  return data.publicUrl;
+    if (!error) {
+      const { data } = supabase.storage.from(BUCKET_NAME).getPublicUrl(fileName);
+      return data.publicUrl;
+    }
+
+    lastError = error.message;
+    console.error(`Upload attempt ${attempt}/3 failed: ${error.message}`);
+
+    if (attempt < 3) {
+      await new Promise(r => setTimeout(r, 1000 * attempt));
+    }
+  }
+
+  throw new Error(`Upload failed after 3 attempts: ${lastError}`);
 }
