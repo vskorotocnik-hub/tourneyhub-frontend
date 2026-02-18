@@ -690,9 +690,9 @@ router.get('/wow-maps', async (_req: Request, res: Response) => {
       include: { _count: { select: { tournaments: true } } },
     });
     res.json({ maps });
-  } catch (err) {
+  } catch (err: any) {
     console.error('List WoW maps error:', err);
-    res.status(500).json({ error: 'Ошибка сервера' });
+    res.status(500).json({ error: 'Ошибка сервера', debug: err?.message || String(err) });
   }
 });
 
@@ -717,7 +717,7 @@ router.post('/wow-maps', async (req: Request, res: Response) => {
   } catch (err) {
     if (err instanceof z.ZodError) { res.status(400).json({ error: 'Неверные данные', details: err.flatten().fieldErrors }); return; }
     console.error('Create WoW map error:', err);
-    res.status(500).json({ error: 'Ошибка сервера' });
+    res.status(500).json({ error: 'Ошибка сервера', debug: (err as any)?.message || String(err) });
   }
 });
 
