@@ -122,7 +122,8 @@ export async function apiFetch<T = unknown>(
 
   if (!res.ok) {
     const error = await res.json().catch(() => ({ error: 'Ошибка сервера' }));
-    throw new ApiError(res.status, error.error || 'Ошибка сервера');
+    const msg = error.debug ? `${error.error}: ${error.debug}` : (error.error || 'Ошибка сервера');
+    throw new ApiError(res.status, msg);
   }
 
   return res.json();
