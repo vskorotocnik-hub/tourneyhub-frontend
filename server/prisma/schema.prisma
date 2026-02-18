@@ -1,0 +1,340 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── AUTH ────────────────────────────────────────────────────
+
+model User {
+  id            String    @id @default(cuid())
+  email         String?   @unique
+  passwordHash  String?
+  username      String    @unique
+  displayName   String?
+  avatar        String?
+  balance       Decimal   @default(0) @db.Decimal(12, 2)
+  role          Role      @default(USER)
+  isVerified    Boolean   @default(false)
+  isBanned      Boolean   @default(false)
+  banReason     String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  lastLoginAt   DateTime?
+
+  ucBalance     Decimal   @default(0) @db.Decimal(12, 2)
+  rating        Int       @default(1000)
+
+  // Relations
+  telegramAuth  TelegramAuth?
+  googleAuth    GoogleAuth?
+  refreshTokens RefreshToken[]
+  tournamentPlayers TournamentPlayer[]
+  tournamentMessages TournamentMessage[]
+  supportMessages    SupportMessage[]
+
+  @@index([email])
+  @@index([username])
+  @@index([createdAt])
+  @@index([rating])
+}
+
+model TelegramAuth {
+  id         String   @id @default(cuid())
+  telegramId BigInt   @unique
+  firstName  String?
+  lastName   String?
+  username   String?
+  photoUrl   String?
+  authDate   DateTime
+  createdAt  DateTime @default(now())
+
+  userId     String   @unique
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([telegramId])
+}
+
+model RefreshToken {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  userAgent String?
+  ip        String?
+
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([token])
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model TelegramAuthSession {
+  id         String   @id @default(cuid())
+  token      String   @unique
+  status     String   @default("pending") // pending | completed | expired
+  telegramId BigInt?
+  firstName  String?
+  lastName   String?
+  username   String?
+  photoUrl   String?
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+
+  @@index([token])
+  @@index([expiresAt])
+}
+
+model EmailVerification {
+  id        String   @id @default(cuid())
+  email     String
+  code      String
+  type      String   // register | login | reset_password
+  expiresAt DateTime
+  attempts  Int      @default(0)
+  verified  Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([email, type])
+  @@index([expiresAt])
+}
+
+model GoogleAuth {
+  id        String   @id @default(cuid())
+  googleId  String   @unique
+  email     String
+  name      String?
+  avatar    String?
+  createdAt DateTime @default(now())
+
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([googleId])
+}
+
+// ─── ENUMS ───────────────────────────────────────────────────
+
+enum Role {
+  USER
+  MODERATOR
+  ADMIN
+}
+
+enum TournamentStatus {
+  SEARCHING    // ждём игроков
+  IN_PROGRESS  // все набрались, идёт игра
+  COMPLETED    // завершён
+  CANCELLED    // отменён
+  DISPUTED     // спор по результатам
+}
+
+enum TeamMode {
+  SOLO   // 1v1
+  DUO    // 2v2
+  TRIO   // 3v3
+  SQUAD  // 4v4
+}
+
+enum GameType {
+  TDM
+  WOW
+}
+
+enum ServerRegion {
+  EUROPE
+  NA
+  ASIA
+  ME
+  SA
+}
+
+enum MatchStatus {
+  PENDING     // ещё не начался
+  ACTIVE      // текущий матч
+  COMPLETED   // завершён
+  DISPUTED    // спор
+}
+
+enum DisputeStatus {
+  OPEN        // жалоба подана
+  CANCELLED   // отменена подавшим
+  RESOLVED    // решена админом
+}
+
+// ─── TOURNAMENTS ─────────────────────────────────────────────
+
+model Tournament {
+  id            String           @id @default(cuid())
+  gameType      GameType         @default(TDM)
+  status        TournamentStatus @default(SEARCHING)
+  teamMode      TeamMode         // SOLO, DUO, TRIO, SQUAD
+  teamCount     Int              // 2, 3 или 4
+  bet           Int              // ставка UC за команду
+  server        ServerRegion     @default(EUROPE)
+  platformFee   Decimal          @default(0) @db.Decimal(12, 2)
+  prizePool     Decimal          @default(0) @db.Decimal(12, 2)
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+  startedAt     DateTime?
+  completedAt   DateTime?
+
+  creatorId     String
+
+  // WoW-specific
+  wowMapId      String?
+  wowMap        WoWMap?          @relation(fields: [wowMapId], references: [id])
+
+  teams         TournamentTeam[]
+  matches       TournamentMatch[]
+  messages      TournamentMessage[]
+  disputes      Dispute[]
+
+  @@index([status])
+  @@index([creatorId])
+  @@index([createdAt])
+  @@index([status, server, teamMode, bet])
+  @@index([gameType, status])
+}
+
+model TournamentTeam {
+  id            String     @id @default(cuid())
+  tournamentId  String
+  tournament    Tournament @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
+  slot          Int        // 1, 2, 3 или 4
+  createdAt     DateTime   @default(now())
+
+  players       TournamentPlayer[]
+  matchesAsTeamA TournamentMatch[] @relation("teamA")
+  matchesAsTeamB TournamentMatch[] @relation("teamB")
+  matchesWon     TournamentMatch[] @relation("matchWinner")
+
+  @@unique([tournamentId, slot])
+  @@index([tournamentId])
+}
+
+model TournamentPlayer {
+  id            String         @id @default(cuid())
+  teamId        String
+  team          TournamentTeam @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  userId        String
+  user          User           @relation(fields: [userId], references: [id])
+  gameId        String         // PUBG ID (10 цифр)
+  partnerGameId String?        // PUBG ID напарника (для DUO)
+  extraIds      String[]       // extra teammate PUBG IDs (for TRIO/SQUAD WoW)
+  isCaptain     Boolean        @default(false)
+  lastReadAt    DateTime       @default(now())
+  createdAt     DateTime       @default(now())
+
+  @@unique([teamId, userId])
+  @@index([userId])
+  @@index([teamId])
+}
+
+model TournamentMatch {
+  id            String       @id @default(cuid())
+  tournamentId  String
+  tournament    Tournament   @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
+  round         Int          // 1 = полуфинал/первый раунд, 2 = финал
+  matchOrder    Int          // порядок в раунде (1 или 2)
+  status        MatchStatus  @default(PENDING)
+
+  teamAId       String?
+  teamA         TournamentTeam? @relation("teamA", fields: [teamAId], references: [id])
+  teamBId       String?
+  teamB         TournamentTeam? @relation("teamB", fields: [teamBId], references: [id])
+
+  // Результаты: каждый капитан отправляет кого считает победителем
+  teamAResult   String?      // teamId кого teamA считает победителем
+  teamBResult   String?      // teamId кого teamB считает победителем
+
+  winnerId      String?
+  winner        TournamentTeam? @relation("matchWinner", fields: [winnerId], references: [id])
+
+  createdAt     DateTime     @default(now())
+  completedAt   DateTime?
+
+  @@index([tournamentId])
+  @@index([status])
+}
+
+model TournamentMessage {
+  id            String     @id @default(cuid())
+  tournamentId  String
+  tournament    Tournament @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
+  userId        String
+  user          User       @relation(fields: [userId], references: [id])
+  content       String
+  isSystem      Boolean    @default(false)
+  isAdmin       Boolean    @default(false)
+  imageUrl      String?
+  createdAt     DateTime   @default(now())
+
+  @@index([tournamentId, createdAt])
+}
+
+// ─── SUPPORT CHAT ───────────────────────────────────────────
+
+model SupportMessage {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  content   String
+  isFromUser Boolean @default(true)  // true = user message, false = admin/support reply
+  isSystem  Boolean  @default(false) // system notifications (balance, etc.)
+  adminId   String?  // which admin replied (null for user messages)
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@index([createdAt])
+}
+
+// ─── WOW MAPS ───────────────────────────────────────────────
+
+model WoWMap {
+  id              String       @id @default(cuid())
+  mapId           String       @unique  // in-game map ID (e.g. "847291")
+  name            String
+  image           String       // URL to map image
+  format          String       // e.g. "1v1", "2v2", "3v3", "4v4", "2v2v2v2"
+  teamCount       Int          // number of teams
+  playersPerTeam  Int          // players per team
+  rounds          Int          // number of rounds
+  rules           String?      // rule description
+  isActive        Boolean      @default(true)
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  // Prize distribution percentages (JSON array, e.g. [50, 30, 20, 0])
+  prizeDistribution String?    // JSON string of percentages per place
+
+  tournaments     Tournament[]
+
+  @@index([isActive])
+}
+
+model Dispute {
+  id            String        @id @default(cuid())
+  tournamentId  String
+  tournament    Tournament    @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
+  matchId       String
+  reporterId    String        // кто подал жалобу
+  reason        String        // причина жалобы
+  videoUrl      String?       // ссылка на видео-доказательство (YouTube/Drive)
+  response      String?       // ответ другой стороны
+  responderId   String?       // кто ответил
+  status        DisputeStatus @default(OPEN)
+  resolution    String?       // решение админа
+  resolvedById  String?       // какой админ решил
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  @@index([tournamentId])
+  @@index([status])
+  @@index([matchId])
+}
