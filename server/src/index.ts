@@ -90,7 +90,7 @@ app.use('/api/wow', wowRoutes);
 
 // Health check
 app.get('/api/health', (_req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+  res.json({ status: 'ok', version: 'v2-wow-maps', timestamp: new Date().toISOString() });
 });
 
 // 404
