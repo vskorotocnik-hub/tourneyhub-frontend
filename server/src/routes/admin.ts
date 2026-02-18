@@ -678,8 +678,6 @@ const wowMapSchema = z.object({
   playersPerTeam: z.number().int().min(1).max(4),
   rounds: z.number().int().min(1).max(100),
   rules: z.string().optional(),
-  rating: z.number().min(0).max(5).optional(),
-  gamesPlayed: z.number().int().min(0).optional(),
   isActive: z.boolean().optional(),
   prizeDistribution: z.string().optional(),
 });

@@ -1,11 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { wowMapApi, type WoWMapAdmin } from '../lib/api';
 
-function formatCount(n: number): string {
-  if (n >= 1000) return (n / 1000).toFixed(n >= 10000 ? 0 : 1) + ' K';
-  return String(n);
-}
-
 export default function WoWMapsPage() {
   const [maps, setMaps] = useState<WoWMapAdmin[]>([]);
   const [loading, setLoading] = useState(true);
@@ -14,7 +9,7 @@ export default function WoWMapsPage() {
   const [editingMap, setEditingMap] = useState<WoWMapAdmin | null>(null);
   const [form, setForm] = useState({
     mapId: '', name: '', format: '', teamCount: 2, playersPerTeam: 1, rounds: 10,
-    rating: 0, gamesPlayed: 0, isActive: true,
+    isActive: true,
   });
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string>('');
@@ -30,7 +25,7 @@ export default function WoWMapsPage() {
   useEffect(() => { load(); }, []);
 
   const resetForm = () => {
-    setForm({ mapId: '', name: '', format: '', teamCount: 2, playersPerTeam: 1, rounds: 10, rating: 0, gamesPlayed: 0, isActive: true });
+    setForm({ mapId: '', name: '', format: '', teamCount: 2, playersPerTeam: 1, rounds: 10, isActive: true });
     setImageFile(null); setImagePreview(''); setEditingMap(null); setShowForm(false);
   };
 
@@ -38,8 +33,7 @@ export default function WoWMapsPage() {
     setEditingMap(m);
     setForm({
       mapId: m.mapId, name: m.name, format: m.format, teamCount: m.teamCount,
-      playersPerTeam: m.playersPerTeam, rounds: m.rounds, rating: m.rating || 0,
-      gamesPlayed: m.gamesPlayed || 0, isActive: m.isActive,
+      playersPerTeam: m.playersPerTeam, rounds: m.rounds, isActive: m.isActive,
     });
     setImagePreview(m.image);
     setImageFile(null);
@@ -130,8 +124,6 @@ export default function WoWMapsPage() {
             <div><label className="text-xs text-zinc-400 block mb-1">Команд</label><input type="number" value={form.teamCount} onChange={e => setForm({...form, teamCount: +e.target.value})} className={inp} min={2} max={8} /></div>
             <div><label className="text-xs text-zinc-400 block mb-1">Игроков/команда</label><input type="number" value={form.playersPerTeam} onChange={e => setForm({...form, playersPerTeam: +e.target.value})} className={inp} min={1} max={4} /></div>
             <div><label className="text-xs text-zinc-400 block mb-1">Раундов</label><input type="number" value={form.rounds} onChange={e => setForm({...form, rounds: +e.target.value})} className={inp} min={1} max={100} /></div>
-            <div><label className="text-xs text-zinc-400 block mb-1">Рейтинг (0-5)</label><input type="number" step="0.1" value={form.rating} onChange={e => setForm({...form, rating: +e.target.value})} className={inp} min={0} max={5} /></div>
-            <div><label className="text-xs text-zinc-400 block mb-1">Кол-во игр</label><input type="number" value={form.gamesPlayed} onChange={e => setForm({...form, gamesPlayed: +e.target.value})} className={inp} min={0} /></div>
             <div className="flex items-center gap-2 col-span-2"><input type="checkbox" checked={form.isActive} onChange={e => setForm({...form, isActive: e.target.checked})} className="w-4 h-4 accent-emerald-500" /><label className="text-sm text-zinc-300">Активна</label></div>
           </div>
           <div className="flex gap-3">
@@ -156,10 +148,6 @@ export default function WoWMapsPage() {
                 </div>
                 <div className="absolute bottom-2 left-2">
                   <span className="bg-blue-600/80 backdrop-blur-sm px-2 py-0.5 rounded text-xs text-white font-medium">{m.format}</span>
-                </div>
-                <div className="absolute bottom-2 right-2 flex items-center gap-2">
-                  <span className="text-xs text-yellow-300">★ {m.rating?.toFixed(1) || '0.0'}</span>
-                  <span className="text-xs text-green-400">{formatCount(m.gamesPlayed || 0)}</span>
                 </div>
               </div>
               <div className="p-3 space-y-2">
