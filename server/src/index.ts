@@ -16,6 +16,7 @@ import adminRoutes from './routes/admin';
 import tournamentRoutes from './routes/tournaments';
 import supportRoutes from './routes/support';
 import wowRoutes from './routes/wow';
+import classicRoutes from './routes/classic';
 import { startBotPolling } from './lib/telegramBot';
 import { initSocketIO } from './shared/socket';
 import { prisma } from './shared/prisma';
@@ -88,6 +89,7 @@ app.use('/api/admin', adminRoutes);
 app.use('/api/tournaments', tournamentRoutes);
 app.use('/api/support', supportRoutes);
 app.use('/api/wow', wowRoutes);
+app.use('/api/classic', classicRoutes);
 
 // Health check
 app.get('/api/health', (_req, res) => {

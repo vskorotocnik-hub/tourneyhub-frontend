@@ -37,6 +37,7 @@ model User {
   supportMessages    SupportMessage[]
   walletTransactions WalletTransaction[] @relation("walletTransactions")
   escrowHolds        EscrowHold[]        @relation("escrowHolds")
+  classicRegistrations ClassicRegistration[]
 
   @@index([email])
   @@index([username])
@@ -146,6 +147,14 @@ enum TeamMode {
 enum GameType {
   TDM
   WOW
+  CLASSIC
+}
+
+enum ClassicTournamentStatus {
+  REGISTRATION   // принимаем игроков
+  IN_PROGRESS    // игра идёт, регистрация закрыта
+  COMPLETED      // админ назначил места, призы выплачены
+  CANCELLED      // отменён
 }
 
 enum ServerRegion {
@@ -380,6 +389,79 @@ model WoWMap {
 
   @@index([isActive])
 }
+
+// ─── CLASSIC TOURNAMENTS ────────────────────────────────────
+
+model ClassicTournament {
+  id              String                  @id @default(cuid())
+  title           String?
+  description     String?
+  map             String                  // Erangel, Miramar, Sanhok, etc.
+  mapImage        String?                 // URL to banner/map image
+  mode            String                  // SOLO, DUO, SQUAD
+  server          ServerRegion            @default(EUROPE)
+  startTime       DateTime                // scheduled start
+  entryFee        Int                     // UC cost to enter
+  prizePool       Int                     // total prize pool in UC
+  maxParticipants Int                     // max registrations
+  winnerCount     Int                     @default(1) // 1, 2, or 3
+  prize1          Int                     @default(0) // 1st place prize
+  prize2          Int                     @default(0) // 2nd place prize
+  prize3          Int                     @default(0) // 3rd place prize
+  status          ClassicTournamentStatus @default(REGISTRATION)
+  createdBy       String                  // admin user ID
+
+  // Winners (registration IDs, set by admin)
+  winner1Id       String?
+  winner2Id       String?
+  winner3Id       String?
+
+  createdAt       DateTime                @default(now())
+  updatedAt       DateTime                @updatedAt
+  startedAt       DateTime?
+  completedAt     DateTime?
+
+  registrations   ClassicRegistration[]
+
+  @@index([status])
+  @@index([startTime])
+  @@index([status, server])
+}
+
+model ClassicRegistration {
+  id              String              @id @default(cuid())
+  tournamentId    String
+  tournament      ClassicTournament   @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
+  userId          String
+  user            User                @relation(fields: [userId], references: [id])
+  pubgIds         String[]            // 1 for solo, 2 for duo, 4 for squad
+  place           Int?                // null until admin assigns (1, 2, or 3)
+  prizeAmount     Int                 @default(0)
+  lastReadAt      DateTime            @default(now())
+  createdAt       DateTime            @default(now())
+
+  messages        ClassicMessage[]
+
+  @@unique([tournamentId, userId])
+  @@index([userId])
+  @@index([tournamentId])
+}
+
+model ClassicMessage {
+  id              String              @id @default(cuid())
+  registrationId  String
+  registration    ClassicRegistration @relation(fields: [registrationId], references: [id], onDelete: Cascade)
+  userId          String              // sender (player or admin)
+  content         String
+  isSystem        Boolean             @default(false)
+  isAdmin         Boolean             @default(false)
+  imageUrl        String?
+  createdAt       DateTime            @default(now())
+
+  @@index([registrationId, createdAt])
+}
+
+// ─── DISPUTES ───────────────────────────────────────────────
 
 model Dispute {
   id            String        @id @default(cuid())

@@ -2,7 +2,7 @@ import { Router, Request, Response } from 'express';
 import { requireAdmin } from '../middleware/auth';
 import { z } from 'zod';
 import { completeTournament, resolveMatch } from '../domains/tournament';
-import { emitNewMessage, emitTournamentUpdate } from '../shared/socket';
+import { emitNewMessage, emitTournamentUpdate, emitBalanceUpdate, emitGlobalTournamentChange } from '../shared/socket';
 import { uploadImage } from '../shared/supabase';
 import { prisma } from '../shared/prisma';
 import * as wallet from '../domains/wallet';
@@ -807,6 +807,441 @@ router.post('/cleanup-system-messages', async (_req: Request, res: Response) => 
     res.json({ deleted: result.count, message: `Удалено ${result.count} старых системных сообщений` });
   } catch (err) {
     console.error('Cleanup system messages error:', err);
+    res.status(500).json({ error: 'Ошибка сервера' });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════
+// ─── CLASSIC TOURNAMENTS (Admin) ─────────────────────────────
+// ═══════════════════════════════════════════════════════════════
+
+const classicCreateSchema = z.object({
+  title: z.string().max(200).optional(),
+  description: z.string().max(1000).optional(),
+  map: z.string().min(1).max(100),
+  mapImage: z.string().url().optional(),
+  mode: z.enum(['SOLO', 'DUO', 'SQUAD']),
+  server: z.enum(['EUROPE', 'NA', 'ASIA', 'ME', 'SA']),
+  startTime: z.string().datetime(),
+  entryFee: z.number().int().min(0),
+  prizePool: z.number().int().min(0),
+  maxParticipants: z.number().int().min(2).max(1000),
+  winnerCount: z.number().int().min(1).max(3),
+  prize1: z.number().int().min(0),
+  prize2: z.number().int().min(0).optional().default(0),
+  prize3: z.number().int().min(0).optional().default(0),
+});
+
+// Create classic tournament
+router.post('/classic', async (req: Request, res: Response) => {
+  try {
+    const data = classicCreateSchema.parse(req.body);
+    const adminId = req.user!.userId;
+
+    const tournament = await prisma.classicTournament.create({
+      data: {
+        title: data.title,
+        description: data.description,
+        map: data.map,
+        mapImage: data.mapImage,
+        mode: data.mode,
+        server: data.server,
+        startTime: new Date(data.startTime),
+        entryFee: data.entryFee,
+        prizePool: data.prizePool,
+        maxParticipants: data.maxParticipants,
+        winnerCount: data.winnerCount,
+        prize1: data.prize1,
+        prize2: data.prize2 || 0,
+        prize3: data.prize3 || 0,
+        createdBy: adminId,
+      },
+    });
+
+    emitGlobalTournamentChange();
+    res.status(201).json(tournament);
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      res.status(400).json({ error: 'Неверные данные', details: err.flatten().fieldErrors });
+      return;
+    }
+    console.error('Create classic tournament error:', err);
+    res.status(500).json({ error: 'Ошибка сервера' });
+  }
+});
+
+// List classic tournaments (admin view)
+router.get('/classic', async (req: Request, res: Response) => {
+  try {
+    const { status, page = '1', limit = '20' } = req.query;
+    const where: Record<string, unknown> = {};
+    if (status) where.status = String(status).toUpperCase();
+
+    const [tournaments, total] = await Promise.all([
+      prisma.classicTournament.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip: (Number(page) - 1) * Number(limit),
+        take: Number(limit),
+        include: { _count: { select: { registrations: true } } },
+      }),
+      prisma.classicTournament.count({ where }),
+    ]);
+
+    res.json({ tournaments, total, page: Number(page), totalPages: Math.ceil(total / Number(limit)) });
+  } catch (err) {
+    console.error('List classic tournaments error:', err);
+    res.status(500).json({ error: 'Ошибка сервера' });
+  }
+});
+
+// ─── CLASSIC ADMIN CHAT (must be before /classic/:id) ────────
+
+// List all registrations with unread messages (admin inbox)
+router.get('/classic/chats', async (_req: Request, res: Response) => {
+  try {
+    const regs = await prisma.classicRegistration.findMany({
+      include: {
+        user: { select: { id: true, username: true, avatar: true } },
+        tournament: { select: { id: true, title: true, map: true, mode: true, status: true } },
+        messages: { orderBy: { createdAt: 'desc' }, take: 1 },
+        _count: { select: { messages: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    const chats = regs.map(r => ({
+      registrationId: r.id,
+      user: r.user,
+      tournament: r.tournament,
+      messageCount: r._count.messages,
+      lastMessage: r.messages[0] ? { content: r.messages[0].content, createdAt: r.messages[0].createdAt, isAdmin: r.messages[0].isAdmin } : null,
+    }));
+
+    res.json({ chats });
+  } catch (err) {
+    console.error('Admin classic chats error:', err);
+    res.status(500).json({ error: 'Ошибка сервера' });
+  }
+});
+
+// Get messages for a registration (admin view)
+router.get('/classic/registrations/:regId/messages', async (req: Request, res: Response) => {
+  try {
+    const regId = req.params.regId as string;
+    const messages = await prisma.classicMessage.findMany({
+      where: { registrationId: regId },
+      orderBy: { createdAt: 'asc' },
+      take: 200,
+    });
+    res.json({ messages });
+  } catch (err) {
+    console.error('Admin classic messages error:', err);
+    res.status(500).json({ error: 'Ошибка сервера' });
+  }
+});
+
+// Send admin message to a registration chat
+const classicAdminMsgSchema = z.object({
+  content: z.string().min(1).max(1000),
+});
+
+router.post('/classic/registrations/:regId/messages', async (req: Request, res: Response) => {
+  try {
+    const { content } = classicAdminMsgSchema.parse(req.body);
+    const adminId = req.user!.userId;
+
+    const regId = req.params.regId as string;
+    const reg = await prisma.classicRegistration.findUnique({ where: { id: regId } });
+    if (!reg) { res.status(404).json({ error: 'Регистрация не найдена' }); return; }
+
+    const message = await prisma.classicMessage.create({
+      data: {
+        registrationId: regId,
+        userId: adminId,
+        content,
+        isAdmin: true,
+      },
+    });
+
+    res.status(201).json(message);
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      res.status(400).json({ error: 'Неверные данные' });
+      return;
+    }
+    console.error('Admin classic send message error:', err);
+    res.status(500).json({ error: 'Ошибка сервера' });
+  }
+});
+
+// Get classic tournament detail with registrations
+router.get('/classic/:id', async (req: Request, res: Response) => {
+  try {
+    const id = req.params.id as string;
+    const tournament = await prisma.classicTournament.findUnique({
+      where: { id },
+      include: {
+        registrations: {
+          include: {
+            user: { select: { id: true, username: true, avatar: true } },
+            _count: { select: { messages: true } },
+          },
+          orderBy: { createdAt: 'asc' },
+        },
+      },
+    });
+
+    if (!tournament) {
+      res.status(404).json({ error: 'Турнир не найден' });
+      return;
+    }
+
+    res.json(tournament);
+  } catch (err) {
+    console.error('Get classic tournament error:', err);
+    res.status(500).json({ error: 'Ошибка сервера' });
+  }
+});
+
+// Update classic tournament
+const classicUpdateSchema = z.object({
+  title: z.string().max(200).optional(),
+  description: z.string().max(1000).optional(),
+  map: z.string().min(1).max(100).optional(),
+  mapImage: z.string().url().optional().nullable(),
+  mode: z.enum(['SOLO', 'DUO', 'SQUAD']).optional(),
+  server: z.enum(['EUROPE', 'NA', 'ASIA', 'ME', 'SA']).optional(),
+  startTime: z.string().datetime().optional(),
+  entryFee: z.number().int().min(0).optional(),
+  prizePool: z.number().int().min(0).optional(),
+  maxParticipants: z.number().int().min(2).max(1000).optional(),
+  winnerCount: z.number().int().min(1).max(3).optional(),
+  prize1: z.number().int().min(0).optional(),
+  prize2: z.number().int().min(0).optional(),
+  prize3: z.number().int().min(0).optional(),
+});
+
+router.put('/classic/:id', async (req: Request, res: Response) => {
+  try {
+    const id = req.params.id as string;
+    const data = classicUpdateSchema.parse(req.body);
+    const tournament = await prisma.classicTournament.findUnique({ where: { id } });
+    if (!tournament) { res.status(404).json({ error: 'Турнир не найден' }); return; }
+    if (tournament.status === 'COMPLETED') { res.status(400).json({ error: 'Нельзя редактировать завершённый турнир' }); return; }
+
+    const updateData: Record<string, unknown> = { ...data };
+    if (data.startTime) updateData.startTime = new Date(data.startTime);
+
+    const updated = await prisma.classicTournament.update({
+      where: { id },
+      data: updateData,
+    });
+
+    emitGlobalTournamentChange();
+    res.json(updated);
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      res.status(400).json({ error: 'Неверные данные', details: err.flatten().fieldErrors });
+      return;
+    }
+    console.error('Update classic tournament error:', err);
+    res.status(500).json({ error: 'Ошибка сервера' });
+  }
+});
+
+// Start classic tournament (close registration)
+router.post('/classic/:id/start', async (req: Request, res: Response) => {
+  try {
+    const id = req.params.id as string;
+    const tournament = await prisma.classicTournament.findUnique({ where: { id } });
+    if (!tournament) { res.status(404).json({ error: 'Турнир не найден' }); return; }
+    if (tournament.status !== 'REGISTRATION') { res.status(400).json({ error: 'Турнир не в статусе регистрации' }); return; }
+
+    const updated = await prisma.classicTournament.update({
+      where: { id },
+      data: { status: 'IN_PROGRESS', startedAt: new Date() },
+    });
+
+    emitGlobalTournamentChange();
+    res.json(updated);
+  } catch (err) {
+    console.error('Start classic tournament error:', err);
+    res.status(500).json({ error: 'Ошибка сервера' });
+  }
+});
+
+// Complete classic tournament — assign winners, pay prizes
+const classicCompleteSchema = z.object({
+  winners: z.array(z.object({
+    registrationId: z.string(),
+    place: z.number().int().min(1).max(3),
+  })).min(1).max(3),
+});
+
+router.post('/classic/:id/complete', async (req: Request, res: Response) => {
+  try {
+    const { winners } = classicCompleteSchema.parse(req.body);
+    const tournamentId = req.params.id as string;
+
+    const affectedUserIds: string[] = [];
+
+    await prisma.$transaction(async (tx) => {
+      const tournament: any = await tx.classicTournament.findUnique({
+        where: { id: tournamentId },
+        include: { registrations: true },
+      });
+
+      if (!tournament) throw Object.assign(new Error('Турнир не найден'), { statusCode: 404 });
+      if (tournament.status !== 'IN_PROGRESS') throw Object.assign(new Error('Турнир не идёт'), { statusCode: 400 });
+
+      // Validate winners
+      for (const w of winners) {
+        if (w.place > tournament.winnerCount) throw Object.assign(new Error(`Турнир имеет ${tournament.winnerCount} призовых мест`), { statusCode: 400 });
+        const reg = tournament.registrations.find((r: any) => r.id === w.registrationId);
+        if (!reg) throw Object.assign(new Error(`Регистрация ${w.registrationId} не найдена`), { statusCode: 400 });
+      }
+
+      // Assign places and pay prizes
+      const prizeMap: Record<number, number> = { 1: tournament.prize1, 2: tournament.prize2, 3: tournament.prize3 };
+      const winnerIds: Record<number, string> = {};
+
+      for (const w of winners) {
+        const reg = tournament.registrations.find((r: any) => r.id === w.registrationId)!;
+        const prizeAmount = prizeMap[w.place] || 0;
+        winnerIds[w.place] = w.registrationId;
+
+        await tx.classicRegistration.update({
+          where: { id: w.registrationId },
+          data: { place: w.place, prizeAmount },
+        });
+
+        if (prizeAmount > 0) {
+          await wallet.credit(tx, reg.userId, prizeAmount, 'UC', {
+            idempotencyKey: `classic-${tournamentId}-prize-${reg.userId}-place${w.place}`,
+            reason: 'classic_tournament_prize',
+            refType: 'classic_tournament',
+            refId: tournamentId,
+          });
+          affectedUserIds.push(reg.userId);
+        }
+
+        // System message in winner's chat
+        const placeEmoji = w.place === 1 ? '🥇' : w.place === 2 ? '🥈' : '🥉';
+        await tx.classicMessage.create({
+          data: {
+            registrationId: w.registrationId,
+            userId: reg.userId,
+            content: `${placeEmoji} Поздравляем! Вы заняли ${w.place} место и получили ${prizeAmount} UC!`,
+            isSystem: true,
+          },
+        });
+      }
+
+      await tx.classicTournament.update({
+        where: { id: tournamentId },
+        data: {
+          status: 'COMPLETED',
+          completedAt: new Date(),
+          winner1Id: winnerIds[1] || null,
+          winner2Id: winnerIds[2] || null,
+          winner3Id: winnerIds[3] || null,
+        },
+      });
+    });
+
+    // Balance updates after tx
+    for (const uid of affectedUserIds) {
+      const bal = await wallet.getBalance(uid);
+      emitBalanceUpdate(uid, bal.balance, bal.ucBalance);
+    }
+    emitGlobalTournamentChange();
+
+    res.json({ completed: true });
+  } catch (err: any) {
+    if (err instanceof z.ZodError) {
+      res.status(400).json({ error: 'Неверные данные', details: err.flatten().fieldErrors });
+      return;
+    }
+    if (err.statusCode) { res.status(err.statusCode).json({ error: err.message }); return; }
+    console.error('Complete classic tournament error:', err);
+    res.status(500).json({ error: 'Ошибка сервера' });
+  }
+});
+
+// Cancel classic tournament — refund all entries
+router.post('/classic/:id/cancel', async (req: Request, res: Response) => {
+  try {
+    const tournamentId = req.params.id as string;
+    const affectedUserIds: string[] = [];
+
+    await prisma.$transaction(async (tx) => {
+      const tournament: any = await tx.classicTournament.findUnique({
+        where: { id: tournamentId },
+        include: { registrations: true },
+      });
+
+      if (!tournament) throw Object.assign(new Error('Турнир не найден'), { statusCode: 404 });
+      if (tournament.status === 'COMPLETED') throw Object.assign(new Error('Нельзя отменить завершённый турнир'), { statusCode: 400 });
+
+      // Refund all entries
+      for (const reg of tournament.registrations) {
+        if (tournament.entryFee > 0) {
+          await wallet.credit(tx, reg.userId, tournament.entryFee, 'UC', {
+            idempotencyKey: `classic-${tournamentId}-refund-${reg.userId}`,
+            reason: 'classic_tournament_refund',
+            refType: 'classic_tournament',
+            refId: tournamentId,
+          });
+          affectedUserIds.push(reg.userId);
+        }
+
+        await tx.classicMessage.create({
+          data: {
+            registrationId: reg.id,
+            userId: reg.userId,
+            content: `❌ Турнир отменён. ${tournament.entryFee > 0 ? `Возврат ${tournament.entryFee} UC на баланс.` : ''}`,
+            isSystem: true,
+          },
+        });
+      }
+
+      await tx.classicTournament.update({
+        where: { id: tournamentId },
+        data: { status: 'CANCELLED' },
+      });
+    });
+
+    for (const uid of affectedUserIds) {
+      const bal = await wallet.getBalance(uid);
+      emitBalanceUpdate(uid, bal.balance, bal.ucBalance);
+    }
+    emitGlobalTournamentChange();
+
+    res.json({ cancelled: true });
+  } catch (err: any) {
+    if (err.statusCode) { res.status(err.statusCode).json({ error: err.message }); return; }
+    console.error('Cancel classic tournament error:', err);
+    res.status(500).json({ error: 'Ошибка сервера' });
+  }
+});
+
+// Delete classic tournament (only if no registrations)
+router.delete('/classic/:id', async (req: Request, res: Response) => {
+  try {
+    const id = req.params.id as string;
+    const tournament: any = await prisma.classicTournament.findUnique({
+      where: { id },
+      include: { _count: { select: { registrations: true } } },
+    });
+    if (!tournament) { res.status(404).json({ error: 'Турнир не найден' }); return; }
+    if (tournament._count.registrations > 0) { res.status(400).json({ error: 'Нельзя удалить турнир с регистрациями. Используйте отмену.' }); return; }
+
+    await prisma.classicTournament.delete({ where: { id } });
+    emitGlobalTournamentChange();
+    res.json({ deleted: true });
+  } catch (err) {
+    console.error('Delete classic tournament error:', err);
     res.status(500).json({ error: 'Ошибка сервера' });
   }
 });
