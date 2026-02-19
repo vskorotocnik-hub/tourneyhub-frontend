@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { requireAdmin } from '../middleware/auth';
 import { z } from 'zod';
-import { completeTournament, resolveMatch } from './tournaments';
+import { completeTournament, resolveMatch } from '../domains/tournament';
 import { emitNewMessage, emitTournamentUpdate } from '../shared/socket';
 import { uploadImage } from '../shared/supabase';
 import { prisma } from '../shared/prisma';
