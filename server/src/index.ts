@@ -17,8 +17,9 @@ import tournamentRoutes from './routes/tournaments';
 import supportRoutes from './routes/support';
 import wowRoutes from './routes/wow';
 import { startBotPolling } from './lib/telegramBot';
-import { initSocketIO } from './lib/socket';
-import { prisma } from './lib/prisma';
+import { initSocketIO } from './shared/socket';
+import { prisma } from './shared/prisma';
+import { AppError } from './shared/errors';
 
 const env = getEnv();
 const app = express();
@@ -96,6 +97,16 @@ app.get('/api/health', (_req, res) => {
 // 404
 app.use((_req, res) => {
   res.status(404).json({ error: 'Маршрут не найден' });
+});
+
+// ─── GLOBAL ERROR HANDLER ───────────────────────────────────
+app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  if (err instanceof AppError) {
+    res.status(err.statusCode).json({ error: err.message, code: err.code });
+    return;
+  }
+  console.error('Unhandled error:', err);
+  res.status(500).json({ error: 'Ошибка сервера' });
 });
 
 // ─── START ───────────────────────────────────────────────────

@@ -35,6 +35,8 @@ model User {
   tournamentPlayers TournamentPlayer[]
   tournamentMessages TournamentMessage[]
   supportMessages    SupportMessage[]
+  walletTransactions WalletTransaction[] @relation("walletTransactions")
+  escrowHolds        EscrowHold[]        @relation("escrowHolds")
 
   @@index([email])
   @@index([username])
@@ -165,6 +167,65 @@ enum DisputeStatus {
   OPEN        // жалоба подана
   CANCELLED   // отменена подавшим
   RESOLVED    // решена админом
+}
+
+enum WalletTxType {
+  DEBIT
+  CREDIT
+  HOLD
+  CAPTURE
+  RELEASE
+}
+
+enum WalletCurrency {
+  UC
+  USD
+}
+
+enum EscrowStatus {
+  HELD
+  CAPTURED
+  RELEASED
+  EXPIRED
+}
+
+// ─── WALLET / LEDGER ────────────────────────────────────────
+
+model WalletTransaction {
+  id              String         @id @default(cuid())
+  userId          String
+  user            User           @relation("walletTransactions", fields: [userId], references: [id])
+  type            WalletTxType
+  currency        WalletCurrency
+  amount          Decimal        @db.Decimal(12, 2)
+  balanceAfter    Decimal        @db.Decimal(12, 2)
+  reason          String
+  refType         String?
+  refId           String?
+  idempotencyKey  String         @unique
+  escrowHoldId    String?
+  createdAt       DateTime       @default(now())
+
+  @@index([userId, createdAt])
+  @@index([refType, refId])
+}
+
+model EscrowHold {
+  id          String         @id @default(cuid())
+  userId      String
+  user        User           @relation("escrowHolds", fields: [userId], references: [id])
+  amount      Decimal        @db.Decimal(12, 2)
+  currency    WalletCurrency
+  status      EscrowStatus   @default(HELD)
+  reason      String
+  refType     String
+  refId       String
+  expiresAt   DateTime?
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  @@index([userId, status])
+  @@index([refType, refId])
 }
 
 // ─── TOURNAMENTS ─────────────────────────────────────────────

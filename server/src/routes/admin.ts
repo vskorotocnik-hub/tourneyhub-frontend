@@ -1,13 +1,13 @@
 import { Router, Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
 import { requireAdmin } from '../middleware/auth';
 import { z } from 'zod';
 import { completeTournament, resolveMatch } from './tournaments';
-import { emitNewMessage, emitTournamentUpdate } from '../lib/socket';
-import { uploadImage } from '../lib/supabase';
+import { emitNewMessage, emitTournamentUpdate } from '../shared/socket';
+import { uploadImage } from '../shared/supabase';
+import { prisma } from '../shared/prisma';
+import * as wallet from '../domains/wallet';
 
 const router = Router();
-const prisma = new PrismaClient();
 
 // All admin routes require ADMIN role
 router.use(requireAdmin);
@@ -296,27 +296,38 @@ const ucBalanceSchema = z.object({
 router.patch('/users/:id/uc-balance', async (req: Request<{ id: string }>, res: Response) => {
   try {
     const { amount, reason } = ucBalanceSchema.parse(req.body);
+    const targetId = req.params.id;
+    const adminId = req.user?.userId || 'admin';
 
-    const targetUser = await prisma.user.findUnique({ where: { id: req.params.id } });
+    const targetUser = await prisma.user.findUnique({ where: { id: targetId }, select: { id: true, username: true } });
     if (!targetUser) {
       res.status(404).json({ error: 'Пользователь не найден' });
       return;
     }
 
-    const newBalance = Number(targetUser.ucBalance) + amount;
-    if (newBalance < 0) {
-      res.status(400).json({ error: 'UC баланс не может быть отрицательным' });
-      return;
-    }
+    const idempotencyKey = `admin-uc-${targetId}-${Date.now()}`;
 
-    const user = await prisma.user.update({
-      where: { id: req.params.id },
-      data: { ucBalance: newBalance },
-      select: { id: true, username: true, ucBalance: true },
+    await prisma.$transaction(async (tx) => {
+      if (amount > 0) {
+        await wallet.credit(tx, targetId, amount, 'UC', {
+          idempotencyKey,
+          reason: `admin_adjustment: ${reason}`,
+          refType: 'admin',
+          refId: adminId,
+        });
+      } else {
+        await wallet.debit(tx, targetId, Math.abs(amount), 'UC', {
+          idempotencyKey,
+          reason: `admin_adjustment: ${reason}`,
+          refType: 'admin',
+          refId: adminId,
+        });
+      }
     });
 
-    console.log(`[ADMIN] ${req.user?.userId} changed UC balance of ${user.username} by ${amount} (reason: ${reason})`);
-    res.json({ ...user, ucBalance: Number(user.ucBalance) });
+    const bal = await wallet.getBalance(targetId);
+    console.log(`[ADMIN] ${adminId} changed UC balance of ${targetUser.username} by ${amount} (reason: ${reason})`);
+    res.json({ id: targetId, username: targetUser.username, ucBalance: bal.ucBalance });
   } catch (err) {
     console.error('Admin UC balance error:', err);
     res.status(500).json({ error: 'Внутренняя ошибка сервера' });
@@ -431,7 +442,7 @@ router.post('/tournaments/:id/messages', async (req: Request, res: Response) => 
     // Upload to Supabase if base64
     let finalImageUrl = imageUrl || null;
     if (finalImageUrl && finalImageUrl.startsWith('data:image/')) {
-      const { uploadImage } = await import('../lib/supabase');
+      const { uploadImage } = await import('../shared/supabase');
       finalImageUrl = await uploadImage(finalImageUrl, `admin/${tid}`);
     }
 

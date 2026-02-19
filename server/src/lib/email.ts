@@ -1,5 +1,5 @@
 import crypto from 'crypto';
-import { prisma } from './prisma';
+import { prisma } from '../shared/prisma';
 import { getEnv } from '../config/env';
 
 // ─── GENERATE 6-DIGIT CODE ─────────────────────────────────

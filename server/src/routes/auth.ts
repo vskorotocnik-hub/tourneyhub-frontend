@@ -1,5 +1,5 @@
 import { Router, Request, Response } from 'express';
-import { prisma } from '../lib/prisma';
+import { prisma } from '../shared/prisma';
 import { hashPassword, comparePassword } from '../lib/password';
 import { signAccessToken, generateTokenId } from '../lib/jwt';
 import { verifyTelegramAuth, TelegramLoginData } from '../lib/telegram';

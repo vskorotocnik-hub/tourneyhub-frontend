@@ -1,11 +1,12 @@
 import { Router, Request, Response } from 'express';
-import { PrismaClient, TournamentStatus } from '@prisma/client';
+import { TournamentStatus } from '@prisma/client';
 import { z } from 'zod';
 import { requireAuth } from '../middleware/auth';
-import { emitNewMessage, emitTournamentUpdate, emitBalanceUpdate, emitTournamentStarted, emitUnreadUpdate, emitGlobalTournamentChange } from '../lib/socket';
+import { emitNewMessage, emitTournamentUpdate, emitBalanceUpdate, emitTournamentStarted, emitUnreadUpdate, emitGlobalTournamentChange } from '../shared/socket';
+import { prisma } from '../shared/prisma';
+import * as wallet from '../domains/wallet';
 
 const router = Router();
-const prisma = new PrismaClient();
 
 // All tournament routes require auth
 router.use(requireAuth);
@@ -198,10 +199,10 @@ router.post('/', async (req: Request, res: Response) => {
       return;
     }
 
-    // Check user has enough UC
+    // Check user exists and is not banned (balance checked by wallet.debit inside tx)
     const user = await prisma.user.findUnique({
       where: { id: userId },
-      select: { ucBalance: true, isBanned: true, rating: true },
+      select: { isBanned: true, rating: true },
     });
 
     if (!user) {
@@ -211,11 +212,6 @@ router.post('/', async (req: Request, res: Response) => {
 
     if (user.isBanned) {
       res.status(403).json({ error: 'Аккаунт заблокирован' });
-      return;
-    }
-
-    if (Number(user.ucBalance) < data.bet) {
-      res.status(400).json({ error: 'Недостаточно UC', required: data.bet, available: Number(user.ucBalance) });
       return;
     }
 
@@ -263,9 +259,11 @@ router.post('/', async (req: Request, res: Response) => {
           const nextSlot = candidate.teams.length + 1;
           const isFull = nextSlot >= candidate.teamCount;
 
-          await tx.user.update({
-            where: { id: userId },
-            data: { ucBalance: { decrement: candidate.bet } },
+          await wallet.debit(tx, userId, candidate.bet, 'UC', {
+            idempotencyKey: `tournament-${candidate.id}-entry-${userId}`,
+            reason: 'tournament_entry',
+            refType: 'tournament',
+            refId: candidate.id,
           });
 
           const team = await tx.tournamentTeam.create({
@@ -292,11 +290,6 @@ router.post('/', async (req: Request, res: Response) => {
         }
 
         // 2b. No match found → CREATE new tournament
-        await tx.user.update({
-          where: { id: userId },
-          data: { ucBalance: { decrement: data.bet } },
-        });
-
         const t = await tx.tournament.create({
           data: {
             teamMode: data.teamMode,
@@ -307,6 +300,13 @@ router.post('/', async (req: Request, res: Response) => {
             prizePool: totalPool - platformFee,
             creatorId: userId,
           },
+        });
+
+        await wallet.debit(tx, userId, data.bet, 'UC', {
+          idempotencyKey: `tournament-${t.id}-entry-${userId}`,
+          reason: 'tournament_entry',
+          refType: 'tournament',
+          refId: t.id,
         });
 
         const team = await tx.tournamentTeam.create({
@@ -351,8 +351,8 @@ router.post('/', async (req: Request, res: Response) => {
     );
 
     // Real-time: balance update for creator
-    const updatedCreator = await prisma.user.findUnique({ where: { id: userId }, select: { balance: true, ucBalance: true } });
-    if (updatedCreator) emitBalanceUpdate(userId, Number(updatedCreator.balance), Number(updatedCreator.ucBalance));
+    const creatorBal = await wallet.getBalance(userId);
+    emitBalanceUpdate(userId, creatorBal.balance, creatorBal.ucBalance);
 
     // Real-time: if matched into existing tournament and it started
     if ((result as any).matched && (result as any).status === 'IN_PROGRESS') {
@@ -726,19 +726,15 @@ router.post('/:id/join', async (req: Request, res: Response) => {
 
         if (tournament.teamMode === 'DUO' && !data.partnerId) throw Object.assign(new Error('Для Duo нужен ID напарника'), { statusCode: 400 });
 
-        const user = await tx.user.findUnique({
-          where: { id: userId },
-          select: { ucBalance: true, username: true },
-        });
-        if (!user || Number(user.ucBalance) < tournament.bet) throw Object.assign(new Error('Недостаточно UC'), { statusCode: 400 });
-
         const nextSlot = tournament.teams.length + 1;
         const isFull = nextSlot >= tournament.teamCount;
 
-        // Deduct UC
-        await tx.user.update({
-          where: { id: userId },
-          data: { ucBalance: { decrement: tournament.bet } },
+        // Deduct UC via wallet ledger
+        await wallet.debit(tx, userId, tournament.bet, 'UC', {
+          idempotencyKey: `tournament-${id}-entry-${userId}`,
+          reason: 'tournament_entry',
+          refType: 'tournament',
+          refId: id,
         });
 
         // Create team
@@ -761,8 +757,8 @@ router.post('/:id/join', async (req: Request, res: Response) => {
     );
 
     // Real-time balance update for the joining user
-    const updatedUser = await prisma.user.findUnique({ where: { id: userId }, select: { balance: true, ucBalance: true } });
-    if (updatedUser) emitBalanceUpdate(userId, Number(updatedUser.balance), Number(updatedUser.ucBalance));
+    const joinBal = await wallet.getBalance(userId);
+    emitBalanceUpdate(userId, joinBal.balance, joinBal.ucBalance);
 
     // Real-time: if tournament started, notify all participants
     if (result.isFull) {
@@ -1093,118 +1089,132 @@ router.post('/:id/matches/:matchId/result', async (req: Request, res: Response) 
 // ─── RESOLVE MATCH (internal) ─────────────────────────────────
 
 export async function resolveMatch(tournamentId: string, matchId: string, winnerTeamId: string) {
-  const tournament = await prisma.tournament.findUnique({
-    where: { id: tournamentId },
-    include: {
-      matches: { orderBy: [{ round: 'asc' }, { matchOrder: 'asc' }] },
-      teams: { include: { players: true } },
-    },
-  });
+  let completedTournament: any = null;
 
-  if (!tournament) return;
-
-  // Mark match as completed
-  await prisma.tournamentMatch.update({
-    where: { id: matchId },
-    data: { status: 'COMPLETED', winnerId: winnerTeamId, completedAt: new Date() },
-  });
-
-  const completedMatch = tournament.matches.find(m => m.id === matchId)!;
-
-  // We need to fetch usernames — quick lookup
-  const allPlayerIds = tournament.teams.flatMap(t => t.players.map(p => p.userId));
-  const users = await prisma.user.findMany({
-    where: { id: { in: allPlayerIds } },
-    select: { id: true, username: true },
-  });
-  const usernameMap = Object.fromEntries(users.map(u => [u.id, u.username]));
-  const teamDisplayName = (teamId: string) => {
-    const team = tournament.teams.find(t => t.id === teamId);
-    if (!team) return 'Команда';
-    const captain = team.players.find(p => p.isCaptain) || team.players[0];
-    return captain ? (usernameMap[captain.userId] || `Команда ${team.slot}`) : `Команда ${team.slot}`;
-  };
-  const teamPubgIds = (teamId: string) => {
-    const team = tournament.teams.find(t => t.id === teamId);
-    if (!team) return '';
-    const ids: string[] = [];
-    for (const p of team.players) {
-      if (p.gameId) ids.push(p.gameId);
-      if (p.partnerGameId) ids.push(p.partnerGameId);
-    }
-    return ids.join(', ');
-  };
-
-  // System message with real username
-  const winnerTeam = tournament.teams.find(t => t.id === winnerTeamId);
-  const winnerName = teamDisplayName(winnerTeamId);
-  const roundName = completedMatch.round === 1
-    ? (tournament.teamCount <= 3 ? 'первом раунде' : 'полуфинале')
-    : 'финале';
-  await prisma.tournamentMessage.create({
-    data: {
-      tournamentId,
-      userId: winnerTeam?.players[0]?.userId || tournament.creatorId,
-      content: `🏆 ${winnerName} победил в ${roundName}!`,
-      isSystem: true,
-    },
-  });
-
-  // Check if there's a next round
-  const nextRoundMatches = tournament.matches.filter(m => m.round === completedMatch.round + 1);
-
-  if (nextRoundMatches.length > 0) {
-    // Advance winner to next round
-    const nextMatch = nextRoundMatches[0];
-
-    // Determine which slot to fill
-    const updateData: Record<string, unknown> = {};
-    if (!nextMatch.teamAId) {
-      updateData.teamAId = winnerTeamId;
-    } else if (!nextMatch.teamBId) {
-      updateData.teamBId = winnerTeamId;
-    }
-
-    // Check if both slots will be filled
-    const otherTeamId = nextMatch.teamAId || nextMatch.teamBId;
-    const willBeReady = (nextMatch.teamAId || updateData.teamAId) && (nextMatch.teamBId || updateData.teamBId);
-    if (willBeReady) {
-      updateData.status = 'ACTIVE';
-    }
-
-    await prisma.tournamentMatch.update({
-      where: { id: nextMatch.id },
-      data: updateData,
+  await prisma.$transaction(async (tx) => {
+    const tournament = await tx.tournament.findUnique({
+      where: { id: tournamentId },
+      include: {
+        matches: { orderBy: [{ round: 'asc' }, { matchOrder: 'asc' }] },
+        teams: { include: { players: true } },
+      },
     });
 
-    if (willBeReady) {
-      const finalTeamA = (updateData.teamAId || nextMatch.teamAId) as string;
-      const finalTeamB = (updateData.teamBId || nextMatch.teamBId) as string;
-      const nameA = teamDisplayName(finalTeamA);
-      const nameB = teamDisplayName(finalTeamB);
-      await prisma.tournamentMessage.create({
-        data: {
-          tournamentId,
-          userId: winnerTeam?.players[0]?.userId || tournament.creatorId,
-          content: `⚔️ Финал начинается!\n\n${nameA} vs ${nameB}`,
-          isSystem: true,
-        },
+    if (!tournament) return;
+
+    // Mark match as completed
+    await tx.tournamentMatch.update({
+      where: { id: matchId },
+      data: { status: 'COMPLETED', winnerId: winnerTeamId, completedAt: new Date() },
+    });
+
+    const completedMatch = tournament.matches.find(m => m.id === matchId)!;
+
+    // We need to fetch usernames — quick lookup
+    const allPlayerIds = tournament.teams.flatMap(t => t.players.map(p => p.userId));
+    const users = await tx.user.findMany({
+      where: { id: { in: allPlayerIds } },
+      select: { id: true, username: true },
+    });
+    const usernameMap = Object.fromEntries(users.map(u => [u.id, u.username]));
+    const teamDisplayName = (teamId: string) => {
+      const team = tournament.teams.find(t => t.id === teamId);
+      if (!team) return 'Команда';
+      const captain = team.players.find(p => p.isCaptain) || team.players[0];
+      return captain ? (usernameMap[captain.userId] || `Команда ${team.slot}`) : `Команда ${team.slot}`;
+    };
+    const teamPubgIds = (teamId: string) => {
+      const team = tournament.teams.find(t => t.id === teamId);
+      if (!team) return '';
+      const ids: string[] = [];
+      for (const p of team.players) {
+        if (p.gameId) ids.push(p.gameId);
+        if (p.partnerGameId) ids.push(p.partnerGameId);
+      }
+      return ids.join(', ');
+    };
+
+    // System message with real username
+    const winnerTeam = tournament.teams.find(t => t.id === winnerTeamId);
+    const winnerName = teamDisplayName(winnerTeamId);
+    const roundName = completedMatch.round === 1
+      ? (tournament.teamCount <= 3 ? 'первом раунде' : 'полуфинале')
+      : 'финале';
+    await tx.tournamentMessage.create({
+      data: {
+        tournamentId,
+        userId: winnerTeam?.players[0]?.userId || tournament.creatorId,
+        content: `🏆 ${winnerName} победил в ${roundName}!`,
+        isSystem: true,
+      },
+    });
+
+    // Check if there's a next round
+    const nextRoundMatches = tournament.matches.filter(m => m.round === completedMatch.round + 1);
+
+    if (nextRoundMatches.length > 0) {
+      // Advance winner to next round
+      const nextMatch = nextRoundMatches[0];
+
+      // Determine which slot to fill
+      const updateData: Record<string, unknown> = {};
+      if (!nextMatch.teamAId) {
+        updateData.teamAId = winnerTeamId;
+      } else if (!nextMatch.teamBId) {
+        updateData.teamBId = winnerTeamId;
+      }
+
+      // Check if both slots will be filled
+      const willBeReady = (nextMatch.teamAId || updateData.teamAId) && (nextMatch.teamBId || updateData.teamBId);
+      if (willBeReady) {
+        updateData.status = 'ACTIVE';
+      }
+
+      await tx.tournamentMatch.update({
+        where: { id: nextMatch.id },
+        data: updateData,
       });
-      // Send PUBG IDs for the final
-      const idsA = teamPubgIds(finalTeamA);
-      const idsB = teamPubgIds(finalTeamB);
-      await prisma.tournamentMessage.create({
-        data: {
-          tournamentId,
-          userId: winnerTeam?.players[0]?.userId || tournament.creatorId,
-          content: `📋 ID для финала:\n\n👤 ${nameA}: ${idsA}\n👤 ${nameB}: ${idsB}\n\n👆 Добавьте друг друга и начните матч TDM`,
-          isSystem: true,
-        },
-      });
+
+      if (willBeReady) {
+        const finalTeamA = (updateData.teamAId || nextMatch.teamAId) as string;
+        const finalTeamB = (updateData.teamBId || nextMatch.teamBId) as string;
+        const nameA = teamDisplayName(finalTeamA);
+        const nameB = teamDisplayName(finalTeamB);
+        await tx.tournamentMessage.create({
+          data: {
+            tournamentId,
+            userId: winnerTeam?.players[0]?.userId || tournament.creatorId,
+            content: `⚔️ Финал начинается!\n\n${nameA} vs ${nameB}`,
+            isSystem: true,
+          },
+        });
+        // Send PUBG IDs for the final
+        const idsA = teamPubgIds(finalTeamA);
+        const idsB = teamPubgIds(finalTeamB);
+        await tx.tournamentMessage.create({
+          data: {
+            tournamentId,
+            userId: winnerTeam?.players[0]?.userId || tournament.creatorId,
+            content: `📋 ID для финала:\n\n👤 ${nameA}: ${idsA}\n👤 ${nameB}: ${idsB}\n\n👆 Добавьте друг друга и начните матч TDM`,
+            isSystem: true,
+          },
+        });
+      }
+    } else {
+      // This was the final — tournament is complete
+      completedTournament = await completeTournamentInTx(tx, tournamentId, winnerTeamId);
     }
-  } else {
-    // This was the final — tournament is complete
-    await completeTournament(tournamentId, winnerTeamId);
+  });
+
+  // Real-time: balance updates after tournament completion (prizes paid)
+  if (completedTournament) {
+    for (const team of completedTournament.teams) {
+      for (const player of team.players) {
+        const bal = await wallet.getBalance(player.userId);
+        emitBalanceUpdate(player.userId, bal.balance, bal.ucBalance);
+      }
+    }
+    emitGlobalTournamentChange();
   }
 
   // Real-time: notify all clients in this tournament room to refresh
@@ -1213,8 +1223,8 @@ export async function resolveMatch(tournamentId: string, matchId: string, winner
 
 // ─── COMPLETE TOURNAMENT ──────────────────────────────────────
 
-export async function completeTournament(tournamentId: string, winnerTeamId: string) {
-  const tournament = await prisma.tournament.findUnique({
+async function completeTournamentInTx(tx: any, tournamentId: string, winnerTeamId: string) {
+  const tournament = await tx.tournament.findUnique({
     where: { id: tournamentId },
     include: {
       teams: { include: { players: true } },
@@ -1222,98 +1232,88 @@ export async function completeTournament(tournamentId: string, winnerTeamId: str
     },
   });
 
-  if (!tournament) return;
+  if (!tournament) return tournament;
 
-  // Build username lookup
-  const allPlayerIds = tournament.teams.flatMap(t => t.players.map(p => p.userId));
-  const users = await prisma.user.findMany({
+  const allPlayerIds = tournament.teams.flatMap((t: any) => t.players.map((p: any) => p.userId));
+  const users = await tx.user.findMany({
     where: { id: { in: allPlayerIds } },
     select: { id: true, username: true },
   });
-  const usernameMap = Object.fromEntries(users.map(u => [u.id, u.username]));
+  const usernameMap = Object.fromEntries(users.map((u: any) => [u.id, u.username]));
 
   const { dist } = calculatePrizes(tournament.bet, tournament.teamCount);
 
-  // Determine placement order
-  // Winner is 1st, final loser is 2nd, semi losers are 3rd-4th
   const placements: string[] = [winnerTeamId];
 
-  // Find final match loser
-  const finalMatch = tournament.matches.find(m => m.round === (tournament.teamCount <= 3 ? (tournament.teamCount === 2 ? 1 : 2) : 2));
+  const finalMatch = tournament.matches.find((m: any) => m.round === (tournament.teamCount <= 3 ? (tournament.teamCount === 2 ? 1 : 2) : 2));
   if (finalMatch) {
     const loserId = finalMatch.teamAId === winnerTeamId ? finalMatch.teamBId : finalMatch.teamAId;
     if (loserId) placements.push(loserId);
   }
 
-  // Add remaining teams (semi-final losers for 4-team, or first-round loser for 3-team)
-  const remainingTeams = tournament.teams.filter(t => !placements.includes(t.id));
-  placements.push(...remainingTeams.map(t => t.id));
+  const remainingTeams = tournament.teams.filter((t: any) => !placements.includes(t.id));
+  placements.push(...remainingTeams.map((t: any) => t.id));
 
-  // Distribute prizes and update ratings
-  await prisma.$transaction(async (tx) => {
-    for (let i = 0; i < placements.length; i++) {
-      const teamId = placements[i];
-      const team = tournament.teams.find(t => t.id === teamId);
-      if (!team) continue;
+  for (let i = 0; i < placements.length; i++) {
+    const teamId = placements[i];
+    const team = tournament.teams.find((t: any) => t.id === teamId);
+    if (!team) continue;
 
-      const prizeAmount = Math.floor(Number(tournament.prizePool) * (dist[i] || 0));
-      const isWinner = i === 0;
-      const ratingChange = calculateRatingChange(tournament.bet, tournament.teamCount, isWinner);
+    const prizeAmount = Math.floor(Number(tournament.prizePool) * (dist[i] || 0));
+    const isWinner = i === 0;
+    const ratingChange = calculateRatingChange(tournament.bet, tournament.teamCount, isWinner);
 
-      // Award prize and update rating for all players in team
-      for (const player of team.players) {
-        if (prizeAmount > 0) {
-          await tx.user.update({
-            where: { id: player.userId },
-            data: {
-              ucBalance: { increment: prizeAmount },
-              rating: { increment: ratingChange },
-            },
-          });
-        } else {
-          await tx.user.update({
-            where: { id: player.userId },
-            data: {
-              rating: { increment: ratingChange },
-            },
-          });
-        }
-      }
-    }
-
-    // Mark tournament as completed
-    await tx.tournament.update({
-      where: { id: tournamentId },
-      data: { status: 'COMPLETED', completedAt: new Date() },
-    });
-
-    // Final system message
-    const winnerTeam = tournament.teams.find(t => t.id === winnerTeamId);
-    const prizeAmount = Math.floor(Number(tournament.prizePool) * dist[0]);
-    await tx.tournamentMessage.create({
-      data: {
-        tournamentId,
-        userId: winnerTeam?.players[0]?.userId || tournament.creatorId,
-        content: `🎉 Турнир завершён! ${winnerTeam ? winnerTeam.players.map(p => usernameMap[p.userId] || 'Игрок').join(', ') : 'Победитель'} получает ${prizeAmount} UC!`,
-        isSystem: true,
-      },
-    });
-  });
-
-  // Real-time: send balance updates to ALL players who received prizes
-  for (const team of tournament.teams) {
     for (const player of team.players) {
-      const updatedUser = await prisma.user.findUnique({
-        where: { id: player.userId },
-        select: { balance: true, ucBalance: true },
-      });
-      if (updatedUser) {
-        emitBalanceUpdate(player.userId, Number(updatedUser.balance), Number(updatedUser.ucBalance));
+      if (prizeAmount > 0) {
+        await wallet.credit(tx, player.userId, prizeAmount, 'UC', {
+          idempotencyKey: `tournament-${tournamentId}-prize-${player.userId}`,
+          reason: 'tournament_prize',
+          refType: 'tournament',
+          refId: tournamentId,
+        });
       }
+      await tx.user.update({
+        where: { id: player.userId },
+        data: { rating: { increment: ratingChange } },
+      });
     }
   }
 
-  // Broadcast completion to all clients
+  await tx.tournament.update({
+    where: { id: tournamentId },
+    data: { status: 'COMPLETED', completedAt: new Date() },
+  });
+
+  const winnerTeam = tournament.teams.find((t: any) => t.id === winnerTeamId);
+  const prizeAmount = Math.floor(Number(tournament.prizePool) * dist[0]);
+  await tx.tournamentMessage.create({
+    data: {
+      tournamentId,
+      userId: winnerTeam?.players[0]?.userId || tournament.creatorId,
+      content: `🎉 Турнир завершён! ${winnerTeam ? winnerTeam.players.map((p: any) => usernameMap[p.userId] || 'Игрок').join(', ') : 'Победитель'} получает ${prizeAmount} UC!`,
+      isSystem: true,
+    },
+  });
+
+  return tournament;
+}
+
+// Public wrapper: admin.ts calls this directly
+export async function completeTournament(tournamentId: string, winnerTeamId: string) {
+  const tournament = await prisma.$transaction(async (tx) => {
+    return completeTournamentInTx(tx, tournamentId, winnerTeamId);
+  });
+
+  if (!tournament) return;
+
+  // Real-time: send balance updates to ALL players (after tx committed)
+  for (const team of (tournament as any).teams) {
+    for (const player of team.players) {
+      const bal = await wallet.getBalance(player.userId);
+      emitBalanceUpdate(player.userId, bal.balance, bal.ucBalance);
+    }
+  }
+
   emitGlobalTournamentChange();
 }
 
@@ -1349,11 +1349,13 @@ router.delete('/:id', async (req: Request, res: Response) => {
     const isLastTeam = tournament.teams.length <= 1;
 
     await prisma.$transaction(async (tx) => {
-      // Refund the leaving player(s)
+      // Refund the leaving player(s) via wallet ledger
       for (const player of userTeam.players) {
-        await tx.user.update({
-          where: { id: player.userId },
-          data: { ucBalance: { increment: tournament.bet } },
+        await wallet.credit(tx, player.userId, tournament.bet, 'UC', {
+          idempotencyKey: `tournament-${id}-refund-${player.userId}`,
+          reason: 'tournament_refund',
+          refType: 'tournament',
+          refId: id,
         });
       }
       // Delete team players, then team
@@ -1385,8 +1387,8 @@ router.delete('/:id', async (req: Request, res: Response) => {
     });
 
     // Real-time: refund balance update
-    const updatedUser = await prisma.user.findUnique({ where: { id: userId }, select: { balance: true, ucBalance: true } });
-    if (updatedUser) emitBalanceUpdate(userId, Number(updatedUser.balance), Number(updatedUser.ucBalance));
+    const refundBal = await wallet.getBalance(userId);
+    emitBalanceUpdate(userId, refundBal.balance, refundBal.ucBalance);
     emitTournamentUpdate(id, { event: 'player_left', tournamentId: id });
 
     // Broadcast to ALL clients that tournament list changed
@@ -1688,7 +1690,7 @@ router.post('/:id/messages/image', async (req: Request, res: Response) => {
     // Upload to Supabase if base64, otherwise use URL as-is
     let finalUrl = rawImage;
     if (rawImage.startsWith('data:image/')) {
-      const { uploadImage } = await import('../lib/supabase');
+      const { uploadImage } = await import('../shared/supabase');
       finalUrl = await uploadImage(rawImage, `tournaments/${id}`);
     }
 

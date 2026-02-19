@@ -1,11 +1,11 @@
 import { Router, Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
 import { z } from 'zod';
 import { requireAuth } from '../middleware/auth';
-import { emitBalanceUpdate, emitTournamentStarted, emitGlobalTournamentChange } from '../lib/socket';
+import { emitBalanceUpdate, emitTournamentStarted, emitGlobalTournamentChange } from '../shared/socket';
+import { prisma } from '../shared/prisma';
+import * as wallet from '../domains/wallet';
 
 const router = Router();
-const prisma = new PrismaClient();
 
 function tmFromPPT(p: number) {
   return p === 1 ? 'SOLO' : p === 2 ? 'DUO' : p === 3 ? 'TRIO' : 'SQUAD' as const;
@@ -140,10 +140,9 @@ router.post('/', async (req: Request, res: Response) => {
     if (!map || !map.isActive) { res.status(404).json({ error: 'Карта не найдена' }); return; }
     const ex = d.extraIds || [];
     if (ex.length !== map.playersPerTeam - 1) { res.status(400).json({ error: `Нужно ${map.playersPerTeam} ID` }); return; }
-    const u = await prisma.user.findUnique({ where: { id: uid }, select: { ucBalance: true, isBanned: true } });
+    const u = await prisma.user.findUnique({ where: { id: uid }, select: { isBanned: true } });
     if (!u) { res.status(404).json({ error: 'Не найден' }); return; }
     if (u.isBanned) { res.status(403).json({ error: 'Заблокирован' }); return; }
-    if (Number(u.ucBalance) < d.bet) { res.status(400).json({ error: 'Недостаточно UC' }); return; }
 
     const tm = tmFromPPT(map.playersPerTeam);
     const { pool, fee } = calcP(d.bet, map.teamCount, map.prizeDistribution);
@@ -160,7 +159,12 @@ router.post('/', async (req: Request, res: Response) => {
         const alr = cand.teams.some((t: any) => t.players.some((p: any) => p.userId === uid));
         const ns = cand.teams.length + 1;
         if (!alr && ns <= map.teamCount) {
-          await tx.user.update({ where: { id: uid }, data: { ucBalance: { decrement: d.bet } } });
+          await wallet.debit(tx, uid, d.bet, 'UC', {
+            idempotencyKey: `tournament-${cand.id}-entry-${uid}`,
+            reason: 'tournament_entry',
+            refType: 'tournament',
+            refId: cand.id,
+          });
           const team = await tx.tournamentTeam.create({ data: { tournamentId: cand.id, slot: ns } });
           await tx.tournamentPlayer.create({
             data: { teamId: team.id, userId: uid, gameId: d.playerId, partnerGameId: ex[0] || null, extraIds: ex.slice(1), isCaptain: true },
@@ -172,7 +176,6 @@ router.post('/', async (req: Request, res: Response) => {
       }
 
       // Create new
-      await tx.user.update({ where: { id: uid }, data: { ucBalance: { decrement: d.bet } } });
       const t = await tx.tournament.create({
         data: {
           gameType: 'WOW', teamMode: tm, teamCount: map.teamCount, bet: d.bet, server: d.server,
@@ -183,6 +186,12 @@ router.post('/', async (req: Request, res: Response) => {
       await tx.tournamentPlayer.create({
         data: { teamId: team.id, userId: uid, gameId: d.playerId, partnerGameId: ex[0] || null, extraIds: ex.slice(1), isCaptain: true },
       });
+      await wallet.debit(tx, uid, d.bet, 'UC', {
+        idempotencyKey: `tournament-${t.id}-entry-${uid}`,
+        reason: 'tournament_entry',
+        refType: 'tournament',
+        refId: t.id,
+      });
       await tx.tournamentMatch.create({ data: { tournamentId: t.id, round: 1, matchOrder: 1, status: 'PENDING' } });
       await tx.tournamentMessage.create({
         data: { tournamentId: t.id, userId: uid, content: `🎮 WoW турнир! ${map.name} • ${map.format} • ${d.bet} UC`, isSystem: true },
@@ -191,8 +200,8 @@ router.post('/', async (req: Request, res: Response) => {
     }, { isolationLevel: 'Serializable' }));
 
     // Real-time events
-    const ub = await prisma.user.findUnique({ where: { id: uid }, select: { balance: true, ucBalance: true } });
-    if (ub) emitBalanceUpdate(uid, Number(ub.balance), Number(ub.ucBalance));
+    const bal = await wallet.getBalance(uid);
+    emitBalanceUpdate(uid, bal.balance, bal.ucBalance);
     if ((result as any).matched && (result as any).tournamentStarted) {
       const all = await prisma.tournamentPlayer.findMany({ where: { team: { tournamentId: (result as any).id } }, select: { userId: true } });
       emitTournamentStarted((result as any).id, all.map(p => p.userId));
@@ -238,13 +247,13 @@ router.post('/:id/join', async (req: Request, res: Response) => {
     const ns = t.teams.length + 1;
     if (ns > map.teamCount) { res.status(400).json({ error: 'Турнир заполнен' }); return; }
 
-    const u = await prisma.user.findUnique({ where: { id: uid }, select: { ucBalance: true, isBanned: true } });
-    if (!u) { res.status(404).json({ error: 'Не найден' }); return; }
-    if (u.isBanned) { res.status(403).json({ error: 'Заблокирован' }); return; }
-    if (Number(u.ucBalance) < t.bet) { res.status(400).json({ error: 'Недостаточно UC' }); return; }
-
     const result = await retry(() => prisma.$transaction(async (tx) => {
-      await tx.user.update({ where: { id: uid }, data: { ucBalance: { decrement: t.bet } } });
+      await wallet.debit(tx, uid, t.bet, 'UC', {
+        idempotencyKey: `tournament-${tid}-entry-${uid}`,
+        reason: 'tournament_entry',
+        refType: 'tournament',
+        refId: tid,
+      });
       const team = await tx.tournamentTeam.create({ data: { tournamentId: tid, slot: ns } });
       await tx.tournamentPlayer.create({
         data: { teamId: team.id, userId: uid, gameId: d.playerId, partnerGameId: ex[0] || null, extraIds: ex.slice(1), isCaptain: true },
@@ -254,8 +263,8 @@ router.post('/:id/join', async (req: Request, res: Response) => {
       return { joined: true, slot: ns, tournamentStarted: full };
     }, { isolationLevel: 'Serializable' }));
 
-    const ub = await prisma.user.findUnique({ where: { id: uid }, select: { balance: true, ucBalance: true } });
-    if (ub) emitBalanceUpdate(uid, Number(ub.balance), Number(ub.ucBalance));
+    const jBal = await wallet.getBalance(uid);
+    emitBalanceUpdate(uid, jBal.balance, jBal.ucBalance);
     if (result.tournamentStarted) {
       const all = await prisma.tournamentPlayer.findMany({ where: { team: { tournamentId: tid } }, select: { userId: true } });
       emitTournamentStarted(tid, all.map(p => p.userId));

@@ -1,5 +1,5 @@
 import crypto from 'crypto';
-import { prisma } from './prisma';
+import { prisma } from '../shared/prisma';
 import { getEnv } from '../config/env';
 
 const TELEGRAM_API = 'https://api.telegram.org/bot';
