@@ -50,7 +50,23 @@ export default function WoWMapsPage() {
     reader.readAsDataURL(file);
   };
 
+  const validate = (): string | null => {
+    if (!editingMap && !imageFile && !imagePreview) return 'Загрузите изображение карты';
+    if (!form.mapId.trim()) return 'Map ID — обязательное поле';
+    if (form.mapId.length > 20) return 'Map ID — максимум 20 символов';
+    if (!form.name.trim()) return 'Название — обязательное поле';
+    if (form.name.length > 100) return 'Название — максимум 100 символов';
+    if (!form.format.trim()) return 'Формат — обязательное поле';
+    if (form.format.length > 20) return 'Формат — максимум 20 символов';
+    if (form.teamCount < 2 || form.teamCount > 8) return 'Команд: от 2 до 8';
+    if (form.playersPerTeam < 1 || form.playersPerTeam > 4) return 'Игроков/команда: от 1 до 4';
+    if (form.rounds < 1 || form.rounds > 100) return 'Раундов: от 1 до 100';
+    return null;
+  };
+
   const handleSave = async () => {
+    const validationError = validate();
+    if (validationError) { setError(validationError); return; }
     setSaving(true); setError('');
     try {
       const data: Record<string, unknown> = { ...form };
@@ -92,7 +108,7 @@ export default function WoWMapsPage() {
         <button onClick={() => { resetForm(); setShowForm(true); }} className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-sm font-medium">+ Добавить</button>
       </div>
 
-      {error && <div className="bg-red-500/20 border border-red-500/40 rounded-lg p-3 text-red-400 text-sm">{error}</div>}
+      {error && <div className="bg-red-500/20 border border-red-500/40 rounded-lg p-3 text-red-400 text-sm whitespace-pre-line">{error}</div>}
 
       {showForm && (
         <div className="bg-zinc-800/80 rounded-xl border border-zinc-700 p-6 space-y-4">

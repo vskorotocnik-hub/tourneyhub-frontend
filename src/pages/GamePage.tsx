@@ -1127,10 +1127,6 @@ const GamePage = () => {
                       <div className="absolute bottom-1.5 left-1.5 bg-blue-600/80 backdrop-blur-sm px-2 py-0.5 rounded text-[10px] text-white font-semibold">
                         {map.format}
                       </div>
-                      <div className="absolute bottom-1.5 right-1.5 flex items-center gap-1.5">
-                        <span className="text-[10px] text-yellow-300 font-medium">★ {(map.rating || 0).toFixed(1)}</span>
-                        <span className="text-[10px] text-green-400 font-medium">{map.gamesPlayed >= 1000 ? ((map.gamesPlayed / 1000).toFixed(map.gamesPlayed >= 10000 ? 0 : 1) + ' K') : (map.gamesPlayed || 0)}</span>
-                      </div>
                     </div>
                     <div className="bg-dark-200/90 p-2">
                       <p className="text-xs text-white font-medium truncate">{map.name}</p>
@@ -2436,10 +2432,6 @@ const GamePage = () => {
                         </div>
                         <div className="absolute bottom-1 left-1 bg-blue-600/80 backdrop-blur-sm px-1.5 py-0.5 rounded text-[9px] text-white font-semibold">
                           {map.format}
-                        </div>
-                        <div className="absolute bottom-1 right-1 flex items-center gap-1">
-                          <span className="text-[9px] text-yellow-300 font-medium">★ {(map.rating || 0).toFixed(1)}</span>
-                          <span className="text-[9px] text-green-400 font-medium">{map.gamesPlayed >= 1000 ? ((map.gamesPlayed / 1000).toFixed(1) + 'K') : (map.gamesPlayed || 0)}</span>
                         </div>
                       </div>
                       <div className="bg-dark-200/90 p-2">

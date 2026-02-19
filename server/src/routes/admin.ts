@@ -673,19 +673,32 @@ router.post('/support/conversations/:userId/reply', async (req: Request, res: Re
 
 // ─── WOW MAP CRUD ────────────────────────────────────────────
 
+const wowFieldNames: Record<string, string> = {
+  mapId: 'Map ID', name: 'Название', format: 'Формат', teamCount: 'Команд',
+  playersPerTeam: 'Игроков/команда', rounds: 'Раундов', image: 'Изображение',
+};
+
 const wowMapSchema = z.object({
-  mapId: z.string().min(1).max(20),
-  name: z.string().min(1).max(100),
-  image: z.string().optional(),            // URL (existing) or empty for upload
-  imageData: z.string().optional(),         // base64 image data for upload
-  format: z.string().min(1).max(20),
-  teamCount: z.number().int().min(2).max(8),
-  playersPerTeam: z.number().int().min(1).max(4),
-  rounds: z.number().int().min(1).max(100),
+  mapId: z.string({ required_error: 'Map ID обязателен' }).min(1, 'Map ID обязателен').max(20, 'Map ID макс. 20 символов'),
+  name: z.string({ required_error: 'Название обязательно' }).min(1, 'Название обязательно').max(100, 'Название макс. 100 символов'),
+  image: z.string().optional(),
+  imageData: z.string().optional(),
+  format: z.string({ required_error: 'Формат обязателен' }).min(1, 'Формат обязателен').max(20, 'Формат макс. 20 символов'),
+  teamCount: z.number({ required_error: 'Кол-во команд обязательно', invalid_type_error: 'Команд — число' }).int('Команд — целое число').min(2, 'Минимум 2 команды').max(8, 'Максимум 8 команд'),
+  playersPerTeam: z.number({ required_error: 'Игроков/команда обязательно', invalid_type_error: 'Игроков — число' }).int('Игроков — целое число').min(1, 'Минимум 1 игрок').max(4, 'Максимум 4 игрока'),
+  rounds: z.number({ required_error: 'Раунды обязательны', invalid_type_error: 'Раунды — число' }).int('Раунды — целое число').min(1, 'Минимум 1 раунд').max(100, 'Максимум 100 раундов'),
   rules: z.string().optional(),
   isActive: z.boolean().optional(),
   prizeDistribution: z.string().optional(),
 });
+
+function formatZodErrors(err: z.ZodError): string {
+  return err.errors.map(e => {
+    const field = e.path.join('.');
+    const label = wowFieldNames[field] || field;
+    return `${label}: ${e.message}`;
+  }).join('\n');
+}
 
 // List all WoW maps
 router.get('/wow-maps', async (_req: Request, res: Response) => {
@@ -720,7 +733,7 @@ router.post('/wow-maps', async (req: Request, res: Response) => {
     const map = await prisma.woWMap.create({ data: { ...rest, image: imageUrl } });
     res.status(201).json(map);
   } catch (err) {
-    if (err instanceof z.ZodError) { res.status(400).json({ error: 'Неверные данные', details: err.flatten().fieldErrors }); return; }
+    if (err instanceof z.ZodError) { res.status(400).json({ error: formatZodErrors(err) }); return; }
     console.error('Create WoW map error:', err);
     res.status(500).json({ error: 'Ошибка сервера', debug: (err as any)?.message || String(err) });
   }
@@ -740,9 +753,9 @@ router.put('/wow-maps/:id', async (req: Request, res: Response) => {
     const map = await prisma.woWMap.update({ where: { id }, data: updateData });
     res.json(map);
   } catch (err) {
-    if (err instanceof z.ZodError) { res.status(400).json({ error: 'Неверные данные' }); return; }
+    if (err instanceof z.ZodError) { res.status(400).json({ error: formatZodErrors(err) }); return; }
     console.error('Update WoW map error:', err);
-    res.status(500).json({ error: 'Ошибка сервера' });
+    res.status(500).json({ error: 'Ошибка сервера', debug: (err as any)?.message || String(err) });
   }
 });
 
