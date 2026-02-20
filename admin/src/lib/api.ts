@@ -347,6 +347,121 @@ export interface WoWMapAdmin {
   _count: { tournaments: number };
 }
 
+// ─── CLASSIC TOURNAMENT TYPES ────────────────────────────────
+
+export interface ClassicTournamentItem {
+  id: string;
+  title: string | null;
+  description: string | null;
+  map: string;
+  mapImage: string | null;
+  mode: string;
+  server: string;
+  startTime: string;
+  entryFee: number;
+  prizePool: number;
+  maxParticipants: number;
+  winnerCount: number;
+  prize1: number;
+  prize2: number;
+  prize3: number;
+  status: string;
+  createdBy: string;
+  winner1Id: string | null;
+  winner2Id: string | null;
+  winner3Id: string | null;
+  createdAt: string;
+  updatedAt: string;
+  startedAt: string | null;
+  completedAt: string | null;
+  _count: { registrations: number };
+}
+
+export interface ClassicRegistrationItem {
+  id: string;
+  tournamentId: string;
+  userId: string;
+  pubgIds: string[];
+  place: number | null;
+  prizeAmount: number;
+  createdAt: string;
+  user: { id: string; username: string; avatar: string | null };
+  _count: { messages: number };
+}
+
+export interface ClassicTournamentDetail extends ClassicTournamentItem {
+  registrations: ClassicRegistrationItem[];
+}
+
+export interface ClassicMessageItem {
+  id: string;
+  registrationId: string;
+  userId: string;
+  content: string;
+  isSystem: boolean;
+  isAdmin: boolean;
+  imageUrl: string | null;
+  createdAt: string;
+}
+
+export interface ClassicChatItem {
+  registrationId: string;
+  user: { id: string; username: string; avatar: string | null };
+  tournament: { id: string; title: string | null; map: string; mode: string; status: string };
+  messageCount: number;
+  lastMessage: { content: string; createdAt: string; isAdmin: boolean } | null;
+}
+
+// ─── CLASSIC TOURNAMENT ADMIN API ───────────────────────────
+
+export const classicApi = {
+  list: (params?: Record<string, string | number>) => {
+    const query = new URLSearchParams();
+    if (params) {
+      Object.entries(params).forEach(([k, v]) => {
+        if (v !== undefined && v !== '') query.set(k, String(v));
+      });
+    }
+    const qs = query.toString();
+    return apiFetch<{ tournaments: ClassicTournamentItem[]; total: number; page: number; totalPages: number }>(
+      `/api/admin/classic${qs ? `?${qs}` : ''}`
+    );
+  },
+
+  get: (id: string) =>
+    apiFetch<ClassicTournamentDetail>(`/api/admin/classic/${id}`),
+
+  create: (data: Record<string, unknown>) =>
+    apiFetch<ClassicTournamentItem>('/api/admin/classic', { method: 'POST', body: data }),
+
+  update: (id: string, data: Record<string, unknown>) =>
+    apiFetch<ClassicTournamentItem>(`/api/admin/classic/${id}`, { method: 'PUT', body: data }),
+
+  start: (id: string) =>
+    apiFetch<ClassicTournamentItem>(`/api/admin/classic/${id}/start`, { method: 'POST' }),
+
+  complete: (id: string, winners: { registrationId: string; place: number }[]) =>
+    apiFetch<{ completed: boolean }>(`/api/admin/classic/${id}/complete`, { method: 'POST', body: { winners } }),
+
+  cancel: (id: string) =>
+    apiFetch<{ cancelled: boolean }>(`/api/admin/classic/${id}/cancel`, { method: 'POST' }),
+
+  remove: (id: string) =>
+    apiFetch<{ deleted: boolean }>(`/api/admin/classic/${id}`, { method: 'DELETE' }),
+
+  // Chat
+  chats: () =>
+    apiFetch<{ chats: ClassicChatItem[] }>('/api/admin/classic/chats'),
+
+  getMessages: (regId: string) =>
+    apiFetch<{ messages: ClassicMessageItem[] }>(`/api/admin/classic/registrations/${regId}/messages`),
+
+  sendMessage: (regId: string, content: string) =>
+    apiFetch<ClassicMessageItem>(`/api/admin/classic/registrations/${regId}/messages`, { method: 'POST', body: { content } }),
+};
+
+// ─── WOW MAP API ────────────────────────────────────────────
+
 export const wowMapApi = {
   list: () => apiFetch<{ maps: WoWMapAdmin[] }>('/api/admin/wow-maps'),
   create: (data: Record<string, unknown>) =>

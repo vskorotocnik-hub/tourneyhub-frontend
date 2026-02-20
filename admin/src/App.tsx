@@ -8,6 +8,7 @@ import PlaceholderPage from './pages/PlaceholderPage';
 import TournamentsPage from './pages/TournamentsPage';
 import SupportPage from './pages/SupportPage';
 import WoWMapsPage from './pages/WoWMapsPage';
+import ClassicTournamentsPage from './pages/ClassicTournamentsPage';
 
 function ProtectedRoutes() {
   const { isAuthenticated, isAdmin, loading } = useAuth();
@@ -50,6 +51,7 @@ function ProtectedRoutes() {
         <Route path="users" element={<UsersPage />} />
         <Route path="listings" element={<PlaceholderPage title="Объявления" />} />
         <Route path="tournaments" element={<TournamentsPage />} />
+        <Route path="classic-tournaments" element={<ClassicTournamentsPage />} />
         <Route path="wow-maps" element={<WoWMapsPage />} />
         <Route path="finances" element={<PlaceholderPage title="Финансы" />} />
         <Route path="support" element={<SupportPage />} />

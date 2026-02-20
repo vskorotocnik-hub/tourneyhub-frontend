@@ -1,9 +1,9 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import type { GameMode, TeamMode, ServerRegion } from '../types';
-import { tournamentLeaders, serverNames, classicTournaments, classicLeaders, type ClassicTournament, type ClassicMode } from '../data/tournaments';
+import { tournamentLeaders, serverNames, classicLeaders } from '../data/tournaments';
 import { wowLeaders } from '../data/wow';
-import { tournamentApi, wowApi, type TournamentListItem, type ActiveTournamentData, type WoWMapItem, type WoWTournamentListItem } from '../lib/api';
+import { tournamentApi, wowApi, classicApi, type TournamentListItem, type ActiveTournamentData, type WoWMapItem, type WoWTournamentListItem, type ClassicTournamentListItem } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
 import { getSocket } from '../lib/socket';
 import AuthPromptModal from '../components/AuthPromptModal';
@@ -85,8 +85,12 @@ const GamePage = () => {
   
   // Classic state
   const [showClassicRegistration, setShowClassicRegistration] = useState(false);
-  const [selectedClassicTournament, setSelectedClassicTournament] = useState<ClassicTournament | null>(null);
+  const [selectedClassicTournament, setSelectedClassicTournament] = useState<ClassicTournamentListItem | null>(null);
   const [currentTime, setCurrentTime] = useState(() => Date.now());
+  const [classicTournaments, setClassicTournaments] = useState<ClassicTournamentListItem[]>([]);
+  const [classicLoading, setClassicLoading] = useState(false);
+  const [classicRegError, setClassicRegError] = useState('');
+  const [classicRegLoading, setClassicRegLoading] = useState(false);
   
   // Update current time every second for countdown
   useEffect(() => {
@@ -95,7 +99,7 @@ const GamePage = () => {
     }, 1000);
     return () => clearInterval(timer);
   }, []);
-  const [classicPlayerIds, setClassicPlayerIds] = useState<string[]>(['', '', '', '']);
+  const [classicPlayerIds, setClassicPlayerIds] = useState<string[]>(['']);
   
   // Active tournament type tracking (for search/found view)
   const [activeGameType, setActiveGameType] = useState<'TDM' | 'WOW'>('TDM');
@@ -243,6 +247,20 @@ const GamePage = () => {
   useEffect(() => {
     loadActiveTournaments();
   }, [loadActiveTournaments]);
+
+  // Load classic tournaments when tab is active
+  const loadClassicTournaments = useCallback(() => {
+    if (activeMode !== 'classic') return;
+    setClassicLoading(true);
+    classicApi.list()
+      .then(res => setClassicTournaments(res.tournaments))
+      .catch(() => {})
+      .finally(() => setClassicLoading(false));
+  }, [activeMode]);
+
+  useEffect(() => {
+    loadClassicTournaments();
+  }, [loadClassicTournaments]);
 
   useEffect(() => {
     if (activeMode === 'wow' && wowMaps.length === 0) {
@@ -1841,15 +1859,21 @@ const GamePage = () => {
             </div>
 
             {/* Tournament Cards */}
+            {classicLoading ? (
+              <div className="text-center py-8"><p className="text-white/50 text-sm">Загрузка турниров...</p></div>
+            ) : classicTournaments.length === 0 ? (
+              <div className="text-center py-8"><p className="text-white/50 text-sm">Нет доступных турниров</p></div>
+            ) : (
             <div className="grid grid-cols-2 xl:grid-cols-3 gap-4">
               {classicTournaments.map((tournament) => {
-                const timeLeft = tournament.startTime.getTime() - currentTime;
+                const timeLeft = new Date(tournament.startTime).getTime() - currentTime;
                 const days = Math.floor(timeLeft / (1000 * 60 * 60 * 24));
                 const hours = Math.floor((timeLeft % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
                 const minutes = Math.floor((timeLeft % (1000 * 60 * 60)) / (1000 * 60));
                 const seconds = Math.floor((timeLeft % (1000 * 60)) / 1000);
-                const modeLabels: Record<ClassicMode, string> = { solo: '👤 Solo', duo: '👥 Duo', squad: '🎯 Squad' };
-                const modeColors: Record<ClassicMode, string> = { solo: 'bg-purple-600', duo: 'bg-cyan-600', squad: 'bg-orange-600' };
+                const cModeLabels: Record<string, string> = { SOLO: '👤 Solo', DUO: '👥 Duo', SQUAD: '🎯 Squad' };
+                const cModeColors: Record<string, string> = { SOLO: 'bg-purple-600', DUO: 'bg-cyan-600', SQUAD: 'bg-orange-600' };
+                const regCount = tournament._count.registrations;
                 
                 return (
                   <div 
@@ -1858,22 +1882,29 @@ const GamePage = () => {
                   >
                     {/* Map Image */}
                     <div className="relative h-32 sm:h-36">
-                      <img src={tournament.mapImage} alt={tournament.map} className="w-full h-full object-cover" />
+                      {tournament.mapImage ? (
+                        <img src={tournament.mapImage} alt={tournament.map} className="w-full h-full object-cover" />
+                      ) : (
+                        <div className="w-full h-full bg-gradient-to-br from-purple-900/40 to-zinc-900 flex items-center justify-center">
+                          <span className="text-3xl">🗺️</span>
+                        </div>
+                      )}
                       <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/30 to-transparent" />
-                      <div className={`absolute top-2 left-2 ${modeColors[tournament.mode]} backdrop-blur-sm px-2 py-0.5 rounded text-xs text-white font-medium`}>
-                        {modeLabels[tournament.mode]}
+                      <div className={`absolute top-2 left-2 ${cModeColors[tournament.mode] || 'bg-purple-600'} backdrop-blur-sm px-2 py-0.5 rounded text-xs text-white font-medium`}>
+                        {cModeLabels[tournament.mode] || tournament.mode}
                       </div>
                       <div className="absolute top-2 right-2 bg-black/60 backdrop-blur-sm px-2 py-0.5 rounded text-xs text-white/80">
-                        {serverNames[tournament.server]}
+                        {tournament.server}
                       </div>
                       <div className="absolute bottom-2 left-2">
-                        <p className="text-white font-bold text-lg">{tournament.map}</p>
+                        <p className="text-white font-bold text-lg">{tournament.title || tournament.map}</p>
                       </div>
                     </div>
                     
                     {/* Tournament Info */}
                     <div className="p-3 space-y-3">
                       {/* Timer */}
+                      {timeLeft > 0 && (
                       <div className="flex items-center gap-2 bg-yellow-500/10 rounded-lg p-2.5">
                         <span className="text-yellow-400 text-lg">⏱️</span>
                         <div className="flex-1">
@@ -1883,6 +1914,7 @@ const GamePage = () => {
                           </p>
                         </div>
                       </div>
+                      )}
                       
                       {/* Entry & Prize */}
                       <div className="grid grid-cols-2 gap-2">
@@ -1898,11 +1930,11 @@ const GamePage = () => {
                       
                       {/* Players */}
                       <div className="flex items-center justify-between text-xs text-white/70">
-                        <span>Участников: {tournament.registeredPlayers}/{tournament.maxPlayers}</span>
+                        <span>Участников: {regCount}/{tournament.maxParticipants}</span>
                         <div className="w-20 h-1.5 bg-white/10 rounded-full overflow-hidden">
                           <div 
                             className="h-full bg-purple-500 rounded-full"
-                            style={{ width: `${(tournament.registeredPlayers / tournament.maxPlayers) * 100}%` }}
+                            style={{ width: `${(regCount / tournament.maxParticipants) * 100}%` }}
                           />
                         </div>
                       </div>
@@ -1915,8 +1947,10 @@ const GamePage = () => {
                       {/* Join Button */}
                       <button
                         onClick={() => {
+                          if (!isAuthenticated) { setShowAuthModal(true); return; }
                           setSelectedClassicTournament(tournament);
-                          setClassicPlayerIds(tournament.mode === 'solo' ? [''] : tournament.mode === 'duo' ? ['', ''] : ['', '', '', '']);
+                          setClassicPlayerIds(tournament.mode === 'SOLO' ? [''] : tournament.mode === 'DUO' ? ['', ''] : ['', '', '', '']);
+                          setClassicRegError('');
                           setShowClassicRegistration(true);
                         }}
                         className="w-full py-2.5 rounded-lg bg-purple-600 
@@ -1929,6 +1963,7 @@ const GamePage = () => {
                 );
               })}
             </div>
+            )}
           </div>
         )}
 
@@ -2660,13 +2695,19 @@ const GamePage = () => {
           {activeMode === 'classic' && (
             <div className="space-y-4">
               {/* Tournament Cards */}
+              {classicLoading ? (
+                <div className="text-center py-8"><p className="text-white/50 text-sm">Загрузка турниров...</p></div>
+              ) : classicTournaments.length === 0 ? (
+                <div className="text-center py-8"><p className="text-white/50 text-sm">Нет доступных турниров</p></div>
+              ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {classicTournaments.map((tournament) => {
-                  const timeLeft = tournament.startTime.getTime() - currentTime;
+                  const timeLeft = new Date(tournament.startTime).getTime() - currentTime;
                   const hours = Math.floor(timeLeft / (1000 * 60 * 60));
                   const minutes = Math.floor((timeLeft % (1000 * 60 * 60)) / (1000 * 60));
-                  const modeLabels: Record<ClassicMode, string> = { solo: '👤 Solo', duo: '👥 Duo', squad: '🎯 Squad' };
-                  const modeColors: Record<ClassicMode, string> = { solo: 'bg-purple-600', duo: 'bg-cyan-600', squad: 'bg-orange-600' };
+                  const cModeLabels: Record<string, string> = { SOLO: '👤 Solo', DUO: '👥 Duo', SQUAD: '🎯 Squad' };
+                  const cModeColors: Record<string, string> = { SOLO: 'bg-purple-600', DUO: 'bg-cyan-600', SQUAD: 'bg-orange-600' };
+                  const regCount = tournament._count.registrations;
                   
                   return (
                     <div 
@@ -2675,19 +2716,26 @@ const GamePage = () => {
                     >
                       {/* Map Image */}
                       <div className="relative h-32">
-                        <img src={tournament.mapImage} alt={tournament.map} className="w-full h-full object-cover" />
+                        {tournament.mapImage ? (
+                          <img src={tournament.mapImage} alt={tournament.map} className="w-full h-full object-cover" />
+                        ) : (
+                          <div className="w-full h-full bg-gradient-to-br from-purple-900/40 to-zinc-900 flex items-center justify-center">
+                            <span className="text-3xl">🗺️</span>
+                          </div>
+                        )}
                         <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/30 to-transparent" />
-                        <div className={`absolute top-2 left-2 ${modeColors[tournament.mode]} backdrop-blur-sm px-2 py-0.5 rounded text-xs text-white font-medium`}>
-                          {modeLabels[tournament.mode]}
+                        <div className={`absolute top-2 left-2 ${cModeColors[tournament.mode] || 'bg-purple-600'} backdrop-blur-sm px-2 py-0.5 rounded text-xs text-white font-medium`}>
+                          {cModeLabels[tournament.mode] || tournament.mode}
                         </div>
                         <div className="absolute bottom-2 left-2">
-                          <p className="text-white font-bold text-base">{tournament.map}</p>
+                          <p className="text-white font-bold text-base">{tournament.title || tournament.map}</p>
                         </div>
                       </div>
                       
                       {/* Tournament Info */}
                       <div className="p-3 space-y-2.5">
                         {/* Timer */}
+                        {timeLeft > 0 && (
                         <div className="flex items-center gap-2 bg-yellow-500/10 rounded-lg px-2.5 py-2">
                           <span className="text-yellow-400 text-base">⏱️</span>
                           <div>
@@ -2695,6 +2743,7 @@ const GamePage = () => {
                             <p className="text-sm font-bold text-yellow-400">{hours}ч {minutes}м</p>
                           </div>
                         </div>
+                        )}
                         
                         {/* Entry & Prize */}
                         <div className="grid grid-cols-2 gap-2">
@@ -2710,17 +2759,19 @@ const GamePage = () => {
                         
                         {/* Players */}
                         <div className="flex items-center justify-between text-xs text-white/60">
-                          <span>{tournament.registeredPlayers}/{tournament.maxPlayers} игроков</span>
+                          <span>{regCount}/{tournament.maxParticipants} игроков</span>
                           <div className="w-16 h-1.5 bg-white/10 rounded-full overflow-hidden">
-                            <div className="h-full bg-purple-500 rounded-full" style={{ width: `${(tournament.registeredPlayers / tournament.maxPlayers) * 100}%` }} />
+                            <div className="h-full bg-purple-500 rounded-full" style={{ width: `${(regCount / tournament.maxParticipants) * 100}%` }} />
                           </div>
                         </div>
                         
                         {/* Register Button */}
                         <button
                           onClick={() => {
+                            if (!isAuthenticated) { setShowAuthModal(true); return; }
                             setSelectedClassicTournament(tournament);
-                            setClassicPlayerIds(tournament.mode === 'solo' ? [''] : tournament.mode === 'duo' ? ['', ''] : ['', '', '', '']);
+                            setClassicPlayerIds(tournament.mode === 'SOLO' ? [''] : tournament.mode === 'DUO' ? ['', ''] : ['', '', '', '']);
+                            setClassicRegError('');
                             setShowClassicRegistration(true);
                           }}
                           className="w-full py-2.5 rounded-xl bg-purple-600 text-white text-sm font-bold hover:opacity-90 transition-opacity"
@@ -2732,6 +2783,7 @@ const GamePage = () => {
                   );
                 })}
               </div>
+              )}
             </div>
           )}
         </main>
@@ -2768,7 +2820,7 @@ const GamePage = () => {
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div 
             className="absolute inset-0 bg-black/70 backdrop-blur-sm"
-            onClick={() => setShowClassicRegistration(false)}
+            onClick={() => !classicRegLoading && setShowClassicRegistration(false)}
           />
           <div className="relative w-full max-w-lg bg-dark-100 rounded-2xl border border-white/20 p-4 pb-6 animate-slide-up"
                style={{ maxHeight: '80vh', overflowY: 'auto' }}>
@@ -2776,11 +2828,19 @@ const GamePage = () => {
             <div className="mb-4">
               <h3 className="text-lg font-bold text-white">📝 Регистрация на турнир</h3>
               <p className="text-xs text-white/50">
-                {selectedClassicTournament.map} • {selectedClassicTournament.mode === 'solo' ? 'Solo' : selectedClassicTournament.mode === 'duo' ? 'Duo' : 'Squad'}
+                {selectedClassicTournament.title || selectedClassicTournament.map} • {selectedClassicTournament.mode === 'SOLO' ? 'Solo' : selectedClassicTournament.mode === 'DUO' ? 'Duo' : 'Squad'}
+              </p>
+              <p className="text-xs text-white/40 mt-1">
+                Взнос: <span className="text-yellow-400 font-semibold">{selectedClassicTournament.entryFee} UC</span> • Приз: <span className="text-accent-green font-semibold">{selectedClassicTournament.prizePool} UC</span>
               </p>
             </div>
+
+            {classicRegError && (
+              <div className="mb-3 px-3 py-2 bg-red-500/10 border border-red-500/30 rounded-lg text-xs text-red-400">{classicRegError}</div>
+            )}
+
             <div className="space-y-3 mb-4">
-              <p className="text-xs text-white/60">🆔 ID игроков</p>
+              <p className="text-xs text-white/60">🆔 ID игроков (PUBG)</p>
               {classicPlayerIds.map((id, index) => (
                 <input
                   key={index}
@@ -2793,7 +2853,7 @@ const GamePage = () => {
                   }}
                   placeholder={index === 0 ? 'Твой игровой ID' : `ID тиммейта ${index}`}
                   className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2.5
-                           text-sm text-white placeholder-white/30 outline-none focus:border-red-500/50"
+                           text-sm text-white placeholder-white/30 outline-none focus:border-purple-500/50"
                 />
               ))}
             </div>
@@ -2806,25 +2866,35 @@ const GamePage = () => {
             </div>
             <div className="space-y-2">
               <button
-                onClick={() => {
-                  const requiredIds = selectedClassicTournament.mode === 'solo' ? 1 : selectedClassicTournament.mode === 'duo' ? 2 : 4;
-                  const filledIds = classicPlayerIds.slice(0, requiredIds).filter(id => id.trim()).length;
-                  if (filledIds < requiredIds) {
-                    alert(`Заполните все ${requiredIds} ID!`);
+                disabled={classicRegLoading}
+                onClick={async () => {
+                  const requiredIds = selectedClassicTournament.mode === 'SOLO' ? 1 : selectedClassicTournament.mode === 'DUO' ? 2 : 4;
+                  const filledIds = classicPlayerIds.slice(0, requiredIds).filter(id => id.trim());
+                  if (filledIds.length < requiredIds) {
+                    setClassicRegError(`Заполните все ${requiredIds} ID!`);
                     return;
                   }
-                  setShowClassicRegistration(false);
-                  navigate(`/messages/classic-${selectedClassicTournament.id}`);
+                  setClassicRegLoading(true);
+                  setClassicRegError('');
+                  try {
+                    await classicApi.register(selectedClassicTournament.id, filledIds);
+                    setShowClassicRegistration(false);
+                    loadClassicTournaments();
+                  } catch (e: any) {
+                    setClassicRegError(e?.message || 'Ошибка регистрации');
+                  }
+                  setClassicRegLoading(false);
                 }}
                 className="w-full py-3 rounded-xl bg-purple-600 
-                         text-white font-bold hover:opacity-90 transition-opacity"
+                         text-white font-bold hover:opacity-90 transition-opacity disabled:opacity-50"
               >
-                ✅ Подтвердить регистрацию
+                {classicRegLoading ? '⏳ Регистрация...' : `✅ Подтвердить (${selectedClassicTournament.entryFee} UC)`}
               </button>
               <button
                 onClick={() => setShowClassicRegistration(false)}
+                disabled={classicRegLoading}
                 className="w-full py-3 rounded-xl bg-white/5 border border-white/10 
-                         text-white/70 font-medium hover:bg-white/10 transition-colors"
+                         text-white/70 font-medium hover:bg-white/10 transition-colors disabled:opacity-50"
               >
                 Отмена
               </button>

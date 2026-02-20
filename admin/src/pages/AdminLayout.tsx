@@ -7,6 +7,7 @@ const navItems = [
   { path: '/users', label: 'Пользователи', icon: '👥' },
   { path: '/listings', label: 'Объявления', icon: '🏷️' },
   { path: '/tournaments', label: 'Турниры', icon: '🏆' },
+  { path: '/classic-tournaments', label: 'Classic Турниры', icon: '🎯' },
   { path: '/wow-maps', label: 'WoW Карты', icon: '🗺️' },
   { path: '/finances', label: 'Финансы', icon: '💰' },
   { path: '/support', label: 'Поддержка', icon: '💬' },
