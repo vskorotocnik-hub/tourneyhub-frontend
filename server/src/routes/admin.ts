@@ -1037,6 +1037,7 @@ router.get('/classic/:id', async (req: Request, res: Response) => {
           },
           orderBy: { createdAt: 'asc' },
         },
+        _count: { select: { registrations: true } },
       },
     });
 
@@ -1279,7 +1280,7 @@ router.post('/classic/:id/cancel', async (req: Request, res: Response) => {
   }
 });
 
-// Delete classic tournament (only if no registrations)
+// Delete classic tournament
 router.delete('/classic/:id', async (req: Request, res: Response) => {
   try {
     const id = req.params.id as string;
@@ -1288,9 +1289,14 @@ router.delete('/classic/:id', async (req: Request, res: Response) => {
       include: { _count: { select: { registrations: true } } },
     });
     if (!tournament) { res.status(404).json({ error: 'Турнир не найден' }); return; }
-    if (tournament._count.registrations > 0) { res.status(400).json({ error: 'Нельзя удалить турнир с регистрациями. Используйте отмену.' }); return; }
+    if (tournament.status === 'IN_PROGRESS') { res.status(400).json({ error: 'Нельзя удалить турнир в процессе. Сначала отмените или завершите.' }); return; }
 
-    await prisma.classicTournament.delete({ where: { id } });
+    // Delete messages, registrations, then tournament
+    await prisma.$transaction(async (tx) => {
+      await tx.classicMessage.deleteMany({ where: { registration: { tournamentId: id } } });
+      await tx.classicRegistration.deleteMany({ where: { tournamentId: id } });
+      await tx.classicTournament.delete({ where: { id } });
+    });
     emitGlobalTournamentChange();
     res.json({ deleted: true });
   } catch (err) {

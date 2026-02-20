@@ -1882,124 +1882,117 @@ const GamePage = () => {
                 const cModeColors: Record<string, string> = { SOLO: 'bg-purple-600', DUO: 'bg-cyan-600', SQUAD: 'bg-orange-600' };
                 const regCount = tournament.registeredPlayers ?? 0;
                 
+                const isExpired = timeLeft <= 0 && !myClassicTournamentIds.has(tournament.id);
+                const isFull = regCount >= tournament.maxParticipants;
+                const isRegistered = myClassicTournamentIds.has(tournament.id);
+                const fillPct = Math.min((regCount / tournament.maxParticipants) * 100, 100);
+                
                 return (
                   <div 
                     key={tournament.id}
-                    className="bg-dark-200/60 backdrop-blur-sm rounded-xl border border-white/20 overflow-hidden"
+                    className={`group relative rounded-2xl overflow-hidden border transition-all ${
+                      isRegistered ? 'border-emerald-500/40 shadow-lg shadow-emerald-500/5' :
+                      isExpired ? 'border-white/5 opacity-50' :
+                      'border-white/10 hover:border-purple-500/30'
+                    }`}
+                    style={{ background: 'linear-gradient(180deg, #1a1a2e 0%, #0d0d15 100%)' }}
                   >
                     {/* Map Image */}
-                    <div className="relative h-32 sm:h-36">
+                    <div className="relative h-36">
                       {tournament.mapImage ? (
                         <img src={tournament.mapImage} alt={tournament.map} className="w-full h-full object-cover" />
                       ) : (
-                        <div className="w-full h-full bg-gradient-to-br from-purple-900/40 to-zinc-900 flex items-center justify-center">
-                          <span className="text-3xl">🗺️</span>
-                        </div>
+                        <div className="w-full h-full bg-gradient-to-br from-purple-900/60 via-zinc-900 to-zinc-800" />
                       )}
-                      <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/30 to-transparent" />
-                      <div className={`absolute top-2 left-2 ${cModeColors[tournament.mode] || 'bg-purple-600'} backdrop-blur-sm px-2 py-0.5 rounded text-xs text-white font-medium`}>
-                        {cModeLabels[tournament.mode] || tournament.mode}
+                      <div className="absolute inset-0 bg-gradient-to-t from-[#0d0d15] via-black/40 to-transparent" />
+                      <div className="absolute top-3 left-3 flex gap-1.5">
+                        <span className={`${cModeColors[tournament.mode] || 'bg-purple-600'} px-2 py-0.5 rounded-md text-[11px] text-white font-semibold`}>
+                          {cModeLabels[tournament.mode] || tournament.mode}
+                        </span>
+                        <span className="bg-black/50 backdrop-blur-sm px-2 py-0.5 rounded-md text-[11px] text-white/70">{tournament.server}</span>
                       </div>
-                      <div className="absolute top-2 right-2 bg-black/60 backdrop-blur-sm px-2 py-0.5 rounded text-xs text-white/80">
-                        {tournament.server}
+                      <div className="absolute top-3 right-3 bg-emerald-500/20 border border-emerald-500/30 px-2 py-0.5 rounded-md">
+                        <span className="text-[11px] text-emerald-400 font-bold">{tournament.prizePool} UC</span>
                       </div>
-                      <div className="absolute bottom-2 left-2">
-                        <p className="text-white font-bold text-lg">{tournament.title || tournament.map}</p>
+                      <div className="absolute bottom-3 left-3 right-3">
+                        <p className="text-white font-bold text-base leading-tight">{tournament.title || tournament.map}</p>
                       </div>
                     </div>
                     
-                    {/* Tournament Info */}
-                    <div className={`p-3 space-y-3 ${timeLeft <= 0 && !myClassicTournamentIds.has(tournament.id) ? 'opacity-60' : ''}`}>
-                      {/* Timer */}
-                      {timeLeft > 0 ? (
-                      <div className="flex items-center gap-2 bg-yellow-500/10 rounded-lg p-2.5">
-                        <span className="text-yellow-400 text-lg">⏱️</span>
-                        <div className="flex-1">
-                          <p className="text-xs text-white/60 mb-0.5">Старт через</p>
-                          <p className="text-base font-bold text-yellow-400">
-                            {days > 0 && `${days}д `}{hours > 0 && `${hours}ч `}{minutes}м {seconds}с
-                          </p>
+                    {/* Card Body */}
+                    <div className="p-3 space-y-2.5">
+                      {/* Timer + Entry */}
+                      <div className="flex gap-2">
+                        {timeLeft > 0 ? (
+                          <div className="flex-1 flex items-center gap-2 bg-yellow-500/8 border border-yellow-500/15 rounded-xl px-3 py-2">
+                            <div className="w-1.5 h-1.5 rounded-full bg-yellow-400 animate-pulse shrink-0" />
+                            <div>
+                              <p className="text-[10px] text-white/40 mb-0.5">Старт через</p>
+                              <p className="text-sm font-bold text-yellow-400 tabular-nums">{days > 0 && `${days}д `}{hours > 0 && `${hours}:`}{String(minutes).padStart(2,'0')}:{String(seconds).padStart(2,'0')}</p>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="flex-1 flex items-center justify-center bg-zinc-800/60 border border-white/5 rounded-xl px-3 py-2">
+                            <p className="text-xs font-semibold text-white/30">Регистрация закрыта</p>
+                          </div>
+                        )}
+                        <div className="bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-center min-w-[80px]">
+                          <p className="text-[10px] text-white/40 mb-0.5">Взнос</p>
+                          <p className="text-sm font-bold text-white">{tournament.entryFee} UC</p>
                         </div>
                       </div>
-                      ) : (
-                      <div className="bg-zinc-700/30 rounded-lg p-2.5 text-center">
-                        <p className="text-sm font-bold text-white/50">⛔ Регистрация завершена</p>
-                        {myClassicTournamentIds.has(tournament.id) && (
-                          <p className="text-xs text-emerald-400 mt-1">Вы зарегистрированы на этот матч</p>
+                      
+                      {/* Prizes row */}
+                      <div className="flex gap-1.5">
+                        <div className="flex-1 bg-yellow-500/8 border border-yellow-500/15 rounded-xl py-1.5 text-center">
+                          <p className="text-[9px] text-yellow-500/60">1 место</p>
+                          <p className="text-sm font-extrabold text-yellow-400">{tournament.prize1}</p>
+                        </div>
+                        {tournament.winnerCount >= 2 && (
+                          <div className="flex-1 bg-zinc-400/8 border border-zinc-500/15 rounded-xl py-1.5 text-center">
+                            <p className="text-[9px] text-zinc-400/60">2 место</p>
+                            <p className="text-sm font-extrabold text-zinc-300">{tournament.prize2}</p>
+                          </div>
+                        )}
+                        {tournament.winnerCount >= 3 && (
+                          <div className="flex-1 bg-orange-500/8 border border-orange-500/15 rounded-xl py-1.5 text-center">
+                            <p className="text-[9px] text-orange-400/60">3 место</p>
+                            <p className="text-sm font-extrabold text-orange-400">{tournament.prize3}</p>
+                          </div>
                         )}
                       </div>
-                      )}
-                      
-                      {/* Entry Fee */}
-                      <div className="bg-white/5 rounded-lg p-2.5 text-center">
-                        <p className="text-xs text-white/60 mb-0.5">Вход</p>
-                        <p className="text-base font-bold text-white">{tournament.entryFee} UC</p>
-                      </div>
 
-                      {/* Prizes per place */}
-                      <div className="bg-accent-green/10 rounded-lg p-2.5">
-                        <p className="text-xs text-white/60 mb-1.5 text-center">Призы</p>
-                        <div className="space-y-1">
-                          <div className="flex items-center justify-between">
-                            <span className="text-xs text-white/70">🥇 1 место</span>
-                            <span className="text-sm font-bold text-accent-green">{tournament.prize1} UC</span>
-                          </div>
-                          {tournament.winnerCount >= 2 && (
-                            <div className="flex items-center justify-between">
-                              <span className="text-xs text-white/70">🥈 2 место</span>
-                              <span className="text-sm font-bold text-accent-green">{tournament.prize2} UC</span>
-                            </div>
-                          )}
-                          {tournament.winnerCount >= 3 && (
-                            <div className="flex items-center justify-between">
-                              <span className="text-xs text-white/70">🥉 3 место</span>
-                              <span className="text-sm font-bold text-accent-green">{tournament.prize3} UC</span>
-                            </div>
-                          )}
+                      {/* Players bar */}
+                      <div>
+                        <div className="flex items-center justify-between text-[11px] mb-1">
+                          <span className="text-white/40">{regCount}/{tournament.maxParticipants} игроков</span>
+                          <span className={`font-semibold ${isFull ? 'text-red-400' : 'text-purple-400'}`}>{Math.round(fillPct)}%</span>
+                        </div>
+                        <div className="h-1 bg-white/5 rounded-full overflow-hidden">
+                          <div className={`h-full rounded-full ${isFull ? 'bg-red-500' : 'bg-purple-500'}`} style={{ width: `${fillPct}%` }} />
                         </div>
                       </div>
                       
-                      {/* Players */}
-                      <div className="flex items-center justify-between text-xs text-white/70">
-                        <span>Участников: {regCount}/{tournament.maxParticipants}</span>
-                        <div className="w-20 h-1.5 bg-white/10 rounded-full overflow-hidden">
-                          <div 
-                            className="h-full bg-purple-500 rounded-full"
-                            style={{ width: `${Math.min((regCount / tournament.maxParticipants) * 100, 100)}%` }}
-                          />
-                        </div>
-                      </div>
-                      
-                      {/* Join Button / Already Registered / Full / Expired */}
-                      {myClassicTournamentIds.has(tournament.id) ? (
-                        <button
-                          onClick={() => navigate('/messages')}
-                          className="w-full py-2.5 rounded-lg bg-emerald-600/20 border border-emerald-500/30
-                                   text-emerald-400 text-sm font-bold hover:bg-emerald-600/30 transition-colors"
-                        >
-                          ✅ Вы зарегистрированы · Открыть чат
+                      {/* Action Button */}
+                      {isRegistered ? (
+                        <button onClick={() => navigate('/messages')}
+                          className="w-full py-2.5 rounded-xl bg-emerald-500/15 border border-emerald-500/25 text-emerald-400 text-sm font-bold hover:bg-emerald-500/25 transition-colors">
+                          ✅ Зарегистрирован · Чат
                         </button>
-                      ) : timeLeft <= 0 ? (
-                        <div className="w-full py-2.5 rounded-lg bg-zinc-700/30 text-white/40 text-sm font-bold text-center">
-                          ⛔ Регистрация закрыта
-                        </div>
-                      ) : regCount >= tournament.maxParticipants ? (
-                        <div className="w-full py-2.5 rounded-lg bg-zinc-700/30 text-white/40 text-sm font-bold text-center">
-                          🚫 Турнир заполнен
-                        </div>
+                      ) : isExpired ? (
+                        <div className="w-full py-2.5 rounded-xl bg-white/3 text-white/25 text-sm font-bold text-center">Регистрация закрыта</div>
+                      ) : isFull ? (
+                        <div className="w-full py-2.5 rounded-xl bg-white/3 text-white/25 text-sm font-bold text-center">Мест нет</div>
                       ) : (
-                        <button
-                          onClick={() => {
+                        <button onClick={() => {
                             if (!isAuthenticated) { setShowAuthModal(true); return; }
                             setSelectedClassicTournament(tournament);
                             setClassicPlayerIds(tournament.mode === 'SOLO' ? [''] : tournament.mode === 'DUO' ? ['', ''] : ['', '', '', '']);
                             setClassicRegError('');
                             setShowClassicRegistration(true);
                           }}
-                          className="w-full py-2.5 rounded-lg bg-purple-600 
-                                   text-white text-sm font-bold hover:opacity-90 transition-opacity"
-                        >
-                          🎮 Зарегистрироваться
+                          className="w-full py-2.5 rounded-xl bg-gradient-to-r from-purple-600 to-purple-500 text-white text-sm font-bold hover:brightness-110 transition-all">
+                          Зарегистрироваться
                         </button>
                       )}
                     </div>
@@ -2753,116 +2746,113 @@ const GamePage = () => {
                   const cModeLabels: Record<string, string> = { SOLO: '👤 Solo', DUO: '👥 Duo', SQUAD: '🎯 Squad' };
                   const cModeColors: Record<string, string> = { SOLO: 'bg-purple-600', DUO: 'bg-cyan-600', SQUAD: 'bg-orange-600' };
                   const regCount = tournament.registeredPlayers ?? 0;
+                  const isExpiredM = timeLeft <= 0 && !myClassicTournamentIds.has(tournament.id);
+                  const isFullM = regCount >= tournament.maxParticipants;
+                  const isRegM = myClassicTournamentIds.has(tournament.id);
+                  const fillM = Math.min((regCount / tournament.maxParticipants) * 100, 100);
                   
                   return (
                     <div 
                       key={tournament.id}
-                      className="bg-dark-200/60 backdrop-blur-sm rounded-xl border border-white/20 overflow-hidden"
+                      className={`rounded-2xl overflow-hidden border transition-all ${
+                        isRegM ? 'border-emerald-500/40' : isExpiredM ? 'border-white/5 opacity-50' : 'border-white/10'
+                      }`}
+                      style={{ background: 'linear-gradient(180deg, #1a1a2e 0%, #0d0d15 100%)' }}
                     >
-                      {/* Map Image */}
-                      <div className="relative h-32">
+                      <div className="relative h-28">
                         {tournament.mapImage ? (
                           <img src={tournament.mapImage} alt={tournament.map} className="w-full h-full object-cover" />
                         ) : (
-                          <div className="w-full h-full bg-gradient-to-br from-purple-900/40 to-zinc-900 flex items-center justify-center">
-                            <span className="text-3xl">🗺️</span>
-                          </div>
+                          <div className="w-full h-full bg-gradient-to-br from-purple-900/60 via-zinc-900 to-zinc-800" />
                         )}
-                        <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/30 to-transparent" />
-                        <div className={`absolute top-2 left-2 ${cModeColors[tournament.mode] || 'bg-purple-600'} backdrop-blur-sm px-2 py-0.5 rounded text-xs text-white font-medium`}>
-                          {cModeLabels[tournament.mode] || tournament.mode}
+                        <div className="absolute inset-0 bg-gradient-to-t from-[#0d0d15] via-black/40 to-transparent" />
+                        <div className="absolute top-2.5 left-2.5 flex gap-1.5">
+                          <span className={`${cModeColors[tournament.mode] || 'bg-purple-600'} px-2 py-0.5 rounded-md text-[11px] text-white font-semibold`}>
+                            {cModeLabels[tournament.mode] || tournament.mode}
+                          </span>
+                          <span className="bg-black/50 px-2 py-0.5 rounded-md text-[11px] text-white/70">{tournament.server}</span>
                         </div>
-                        <div className="absolute bottom-2 left-2">
-                          <p className="text-white font-bold text-base">{tournament.title || tournament.map}</p>
+                        <div className="absolute top-2.5 right-2.5 bg-emerald-500/20 border border-emerald-500/30 px-2 py-0.5 rounded-md">
+                          <span className="text-[11px] text-emerald-400 font-bold">{tournament.prizePool} UC</span>
+                        </div>
+                        <div className="absolute bottom-2.5 left-2.5 right-2.5">
+                          <p className="text-white font-bold text-sm leading-tight">{tournament.title || tournament.map}</p>
                         </div>
                       </div>
                       
-                      {/* Tournament Info */}
-                      <div className={`p-3 space-y-2.5 ${timeLeft <= 0 && !myClassicTournamentIds.has(tournament.id) ? 'opacity-60' : ''}`}>
-                        {/* Timer */}
-                        {timeLeft > 0 ? (
-                        <div className="flex items-center gap-2 bg-yellow-500/10 rounded-lg px-2.5 py-2">
-                          <span className="text-yellow-400 text-base">⏱️</span>
-                          <div>
-                            <p className="text-xs text-white/50">Старт через</p>
-                            <p className="text-sm font-bold text-yellow-400">{hours}ч {minutes}м {seconds}с</p>
-                          </div>
-                        </div>
-                        ) : (
-                        <div className="bg-zinc-700/30 rounded-lg px-2.5 py-2 text-center">
-                          <p className="text-sm font-bold text-white/50">⛔ Регистрация завершена</p>
-                          {myClassicTournamentIds.has(tournament.id) && (
-                            <p className="text-xs text-emerald-400 mt-0.5">Вы зарегистрированы</p>
+                      <div className="p-3 space-y-2">
+                        {/* Timer + Entry */}
+                        <div className="flex gap-2">
+                          {timeLeft > 0 ? (
+                            <div className="flex-1 flex items-center gap-2 bg-yellow-500/8 border border-yellow-500/15 rounded-xl px-2.5 py-1.5">
+                              <div className="w-1.5 h-1.5 rounded-full bg-yellow-400 animate-pulse shrink-0" />
+                              <div>
+                                <p className="text-[10px] text-white/40">Старт через</p>
+                                <p className="text-xs font-bold text-yellow-400 tabular-nums">{hours}:{String(minutes).padStart(2,'0')}:{String(seconds).padStart(2,'0')}</p>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="flex-1 flex items-center justify-center bg-zinc-800/60 border border-white/5 rounded-xl px-2.5 py-1.5">
+                              <p className="text-[11px] font-semibold text-white/30">Регистрация закрыта</p>
+                            </div>
                           )}
-                        </div>
-                        )}
-                        
-                        {/* Entry Fee */}
-                        <div className="bg-white/5 rounded-lg py-2 text-center">
-                          <p className="text-xs text-white/50">Вход</p>
-                          <p className="text-sm font-bold text-white">{tournament.entryFee} UC</p>
+                          <div className="bg-white/5 border border-white/10 rounded-xl px-2.5 py-1.5 text-center min-w-[70px]">
+                            <p className="text-[10px] text-white/40">Взнос</p>
+                            <p className="text-xs font-bold text-white">{tournament.entryFee} UC</p>
+                          </div>
                         </div>
 
-                        {/* Prizes per place */}
-                        <div className="bg-accent-green/10 rounded-lg p-2">
-                          <p className="text-xs text-white/50 mb-1 text-center">Призы</p>
-                          <div className="space-y-0.5">
-                            <div className="flex items-center justify-between">
-                              <span className="text-xs text-white/60">🥇 1 место</span>
-                              <span className="text-xs font-bold text-accent-green">{tournament.prize1} UC</span>
+                        {/* Prizes row */}
+                        <div className="flex gap-1.5">
+                          <div className="flex-1 bg-yellow-500/8 border border-yellow-500/15 rounded-xl py-1.5 text-center">
+                            <p className="text-[9px] text-yellow-500/60">1 место</p>
+                            <p className="text-xs font-extrabold text-yellow-400">{tournament.prize1}</p>
+                          </div>
+                          {tournament.winnerCount >= 2 && (
+                            <div className="flex-1 bg-zinc-400/8 border border-zinc-500/15 rounded-xl py-1.5 text-center">
+                              <p className="text-[9px] text-zinc-400/60">2 место</p>
+                              <p className="text-xs font-extrabold text-zinc-300">{tournament.prize2}</p>
                             </div>
-                            {tournament.winnerCount >= 2 && (
-                              <div className="flex items-center justify-between">
-                                <span className="text-xs text-white/60">🥈 2 место</span>
-                                <span className="text-xs font-bold text-accent-green">{tournament.prize2} UC</span>
-                              </div>
-                            )}
-                            {tournament.winnerCount >= 3 && (
-                              <div className="flex items-center justify-between">
-                                <span className="text-xs text-white/60">🥉 3 место</span>
-                                <span className="text-xs font-bold text-accent-green">{tournament.prize3} UC</span>
-                              </div>
-                            )}
+                          )}
+                          {tournament.winnerCount >= 3 && (
+                            <div className="flex-1 bg-orange-500/8 border border-orange-500/15 rounded-xl py-1.5 text-center">
+                              <p className="text-[9px] text-orange-400/60">3 место</p>
+                              <p className="text-xs font-extrabold text-orange-400">{tournament.prize3}</p>
+                            </div>
+                          )}
+                        </div>
+                        
+                        {/* Players bar */}
+                        <div>
+                          <div className="flex items-center justify-between text-[11px] mb-1">
+                            <span className="text-white/40">{regCount}/{tournament.maxParticipants}</span>
+                            <span className={`font-semibold ${isFullM ? 'text-red-400' : 'text-purple-400'}`}>{Math.round(fillM)}%</span>
+                          </div>
+                          <div className="h-1 bg-white/5 rounded-full overflow-hidden">
+                            <div className={`h-full rounded-full ${isFullM ? 'bg-red-500' : 'bg-purple-500'}`} style={{ width: `${fillM}%` }} />
                           </div>
                         </div>
                         
-                        {/* Players */}
-                        <div className="flex items-center justify-between text-xs text-white/60">
-                          <span>{regCount}/{tournament.maxParticipants} игроков</span>
-                          <div className="w-16 h-1.5 bg-white/10 rounded-full overflow-hidden">
-                            <div className="h-full bg-purple-500 rounded-full" style={{ width: `${Math.min((regCount / tournament.maxParticipants) * 100, 100)}%` }} />
-                          </div>
-                        </div>
-                        
-                        {/* Register Button / Already Registered / Full / Expired */}
-                        {myClassicTournamentIds.has(tournament.id) ? (
-                          <button
-                            onClick={() => navigate('/messages')}
-                            className="w-full py-2.5 rounded-xl bg-emerald-600/20 border border-emerald-500/30
-                                     text-emerald-400 text-sm font-bold hover:bg-emerald-600/30 transition-colors"
-                          >
+                        {/* Action */}
+                        {isRegM ? (
+                          <button onClick={() => navigate('/messages')}
+                            className="w-full py-2 rounded-xl bg-emerald-500/15 border border-emerald-500/25 text-emerald-400 text-xs font-bold">
                             ✅ Зарегистрирован · Чат
                           </button>
-                        ) : timeLeft <= 0 ? (
-                          <div className="w-full py-2.5 rounded-xl bg-zinc-700/30 text-white/40 text-sm font-bold text-center">
-                            ⛔ Регистрация закрыта
-                          </div>
-                        ) : regCount >= tournament.maxParticipants ? (
-                          <div className="w-full py-2.5 rounded-xl bg-zinc-700/30 text-white/40 text-sm font-bold text-center">
-                            🚫 Турнир заполнен
-                          </div>
+                        ) : isExpiredM ? (
+                          <div className="w-full py-2 rounded-xl bg-white/3 text-white/25 text-xs font-bold text-center">Закрыта</div>
+                        ) : isFullM ? (
+                          <div className="w-full py-2 rounded-xl bg-white/3 text-white/25 text-xs font-bold text-center">Мест нет</div>
                         ) : (
-                          <button
-                            onClick={() => {
+                          <button onClick={() => {
                               if (!isAuthenticated) { setShowAuthModal(true); return; }
                               setSelectedClassicTournament(tournament);
                               setClassicPlayerIds(tournament.mode === 'SOLO' ? [''] : tournament.mode === 'DUO' ? ['', ''] : ['', '', '', '']);
                               setClassicRegError('');
                               setShowClassicRegistration(true);
                             }}
-                            className="w-full py-2.5 rounded-xl bg-purple-600 text-white text-sm font-bold hover:opacity-90 transition-opacity"
-                          >
-                            🎮 Регистрация
+                            className="w-full py-2 rounded-xl bg-gradient-to-r from-purple-600 to-purple-500 text-white text-xs font-bold">
+                            Зарегистрироваться
                           </button>
                         )}
                       </div>

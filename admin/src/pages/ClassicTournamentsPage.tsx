@@ -368,7 +368,7 @@ export default function ClassicTournamentsPage() {
                 { l: 'Старт', v: new Date(detail.startTime).toLocaleString('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) },
                 { l: 'Взнос', v: `${detail.entryFee} UC`, c: 'text-yellow-400' },
                 { l: 'Фонд', v: `${detail.prizePool} UC`, c: 'text-emerald-400' },
-                { l: 'Участники', v: `${detail._count.registrations} / ${detail.maxParticipants}` },
+                { l: 'Участники', v: `${detail._count?.registrations ?? detail.registrations.length} / ${detail.maxParticipants}` },
                 { l: 'Победители', v: String(detail.winnerCount) },
               ].map(i => (
                 <div key={i.l} className="bg-zinc-800/50 rounded-lg p-3 border border-zinc-700/50">
@@ -394,23 +394,29 @@ export default function ClassicTournamentsPage() {
                   className="w-full py-2 rounded-lg bg-red-600/20 text-red-400 text-xs font-medium hover:bg-red-600/30 disabled:opacity-50">
                   {actionLoading === 'cancel' ? 'Загрузка...' : 'Отменить'}
                 </button>
-                {detail._count.registrations === 0 && (
-                  <button onClick={() => handleDelete(detail.id)} disabled={!!actionLoading}
-                    className="w-full py-2 rounded-lg bg-red-600 text-white text-xs font-medium hover:bg-red-700 disabled:opacity-50">
-                    {actionLoading === 'delete' ? 'Загрузка...' : 'Удалить'}
-                  </button>
-                )}
+                <button onClick={() => handleDelete(detail.id)} disabled={!!actionLoading}
+                  className="w-full py-2 rounded-lg bg-red-600 text-white text-xs font-medium hover:bg-red-700 disabled:opacity-50">
+                  {actionLoading === 'delete' ? 'Загрузка...' : '🗑 Удалить турнир'}
+                </button>
               </>)}
               {detail.status === 'IN_PROGRESS' && (<>
+                <button onClick={() => openEdit(detail)} className="w-full py-2 rounded-lg bg-zinc-700 text-white text-xs font-medium hover:bg-zinc-600">✏️ Редактировать</button>
                 <button onClick={() => { setWinners([]); setShowComplete(true); }}
                   className="w-full py-2 rounded-lg bg-emerald-600 text-white text-xs font-medium hover:bg-emerald-700">
-                  Завершить — назначить победителей
+                  🏆 Завершить — назначить победителей
                 </button>
                 <button onClick={() => handleAction('cancel', detail.id, 'Отменить и вернуть взносы?', () => classicApi.cancel(detail.id))} disabled={!!actionLoading}
                   className="w-full py-2 rounded-lg bg-red-600/20 text-red-400 text-xs font-medium hover:bg-red-600/30 disabled:opacity-50">
                   {actionLoading === 'cancel' ? 'Загрузка...' : 'Отменить и возврат'}
                 </button>
               </>)}
+              {/* Delete — always available */}
+              {detail.status !== 'IN_PROGRESS' && detail.status !== 'REGISTRATION' && (
+                <button onClick={() => handleDelete(detail.id)} disabled={!!actionLoading}
+                  className="w-full py-2 rounded-lg bg-red-600 text-white text-xs font-medium hover:bg-red-700 disabled:opacity-50">
+                  {actionLoading === 'delete' ? 'Загрузка...' : '🗑 Удалить турнир'}
+                </button>
+              )}
             </div>
           </div>
           <div className="lg:col-span-2 space-y-4">
