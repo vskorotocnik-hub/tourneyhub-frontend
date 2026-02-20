@@ -26,7 +26,7 @@ import TournamentDetailPage from './pages/TournamentDetailPage';
 import BoostPage from './pages/BoostPage';
 import SellPage from './pages/SellPage.tsx';
 import TournamentRoomPage from './pages/TournamentRoomPage';
-import ClassicChatsPage from './pages/ClassicChatsPage';
+
 import BottomNav from './components/BottomNav';
 import Header from './components/Header';
 import WelcomeModal from './components/WelcomeModal';
@@ -118,8 +118,7 @@ function AppContent() {
         <Route path="/bots" element={<RequireAuth><BotsPage /></RequireAuth>} />
         <Route path="/clan" element={<RequireAuth><ClanPage /></RequireAuth>} />
         <Route path="/tournament/:tournamentId" element={<RequireAuth><TournamentRoomPage /></RequireAuth>} />
-        <Route path="/classic-chats" element={<RequireAuth><ClassicChatsPage /></RequireAuth>} />
-        <Route path="/classic-chats/:regId" element={<RequireAuth><ClassicChatsPage /></RequireAuth>} />
+        
         </Routes>
       </div>
       {!isFullscreenPage && <BottomNav />}

@@ -1909,29 +1909,53 @@ const GamePage = () => {
                     </div>
                     
                     {/* Tournament Info */}
-                    <div className="p-3 space-y-3">
+                    <div className={`p-3 space-y-3 ${timeLeft <= 0 && !myClassicTournamentIds.has(tournament.id) ? 'opacity-60' : ''}`}>
                       {/* Timer */}
-                      {timeLeft > 0 && (
+                      {timeLeft > 0 ? (
                       <div className="flex items-center gap-2 bg-yellow-500/10 rounded-lg p-2.5">
                         <span className="text-yellow-400 text-lg">⏱️</span>
                         <div className="flex-1">
-                          <p className="text-xs text-white/60 mb-0.5">Запуск через</p>
+                          <p className="text-xs text-white/60 mb-0.5">Старт через</p>
                           <p className="text-base font-bold text-yellow-400">
                             {days > 0 && `${days}д `}{hours > 0 && `${hours}ч `}{minutes}м {seconds}с
                           </p>
                         </div>
                       </div>
+                      ) : (
+                      <div className="bg-zinc-700/30 rounded-lg p-2.5 text-center">
+                        <p className="text-sm font-bold text-white/50">⛔ Регистрация завершена</p>
+                        {myClassicTournamentIds.has(tournament.id) && (
+                          <p className="text-xs text-emerald-400 mt-1">Вы зарегистрированы на этот матч</p>
+                        )}
+                      </div>
                       )}
                       
-                      {/* Entry & Prize */}
-                      <div className="grid grid-cols-2 gap-2">
-                        <div className="bg-white/5 rounded-lg p-2.5 text-center">
-                          <p className="text-xs text-white/60 mb-0.5">Вход</p>
-                          <p className="text-base font-bold text-white">{tournament.entryFee} UC</p>
-                        </div>
-                        <div className="bg-accent-green/10 rounded-lg p-2.5 text-center">
-                          <p className="text-xs text-white/60 mb-0.5">Призовой фонд</p>
-                          <p className="text-base font-bold text-accent-green">{tournament.prizePool} UC</p>
+                      {/* Entry Fee */}
+                      <div className="bg-white/5 rounded-lg p-2.5 text-center">
+                        <p className="text-xs text-white/60 mb-0.5">Вход</p>
+                        <p className="text-base font-bold text-white">{tournament.entryFee} UC</p>
+                      </div>
+
+                      {/* Prizes per place */}
+                      <div className="bg-accent-green/10 rounded-lg p-2.5">
+                        <p className="text-xs text-white/60 mb-1.5 text-center">Призы</p>
+                        <div className="space-y-1">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs text-white/70">🥇 1 место</span>
+                            <span className="text-sm font-bold text-accent-green">{tournament.prize1} UC</span>
+                          </div>
+                          {tournament.winnerCount >= 2 && (
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs text-white/70">🥈 2 место</span>
+                              <span className="text-sm font-bold text-accent-green">{tournament.prize2} UC</span>
+                            </div>
+                          )}
+                          {tournament.winnerCount >= 3 && (
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs text-white/70">🥉 3 место</span>
+                              <span className="text-sm font-bold text-accent-green">{tournament.prize3} UC</span>
+                            </div>
+                          )}
                         </div>
                       </div>
                       
@@ -1941,25 +1965,28 @@ const GamePage = () => {
                         <div className="w-20 h-1.5 bg-white/10 rounded-full overflow-hidden">
                           <div 
                             className="h-full bg-purple-500 rounded-full"
-                            style={{ width: `${(regCount / tournament.maxParticipants) * 100}%` }}
+                            style={{ width: `${Math.min((regCount / tournament.maxParticipants) * 100, 100)}%` }}
                           />
                         </div>
                       </div>
                       
-                      {/* Info text */}
-                      <p className="text-xs text-white/60 leading-relaxed">
-                        📌 После регистрации откроется чат с информацией о турнире.
-                      </p>
-                      
-                      {/* Join Button / Already Registered */}
+                      {/* Join Button / Already Registered / Full / Expired */}
                       {myClassicTournamentIds.has(tournament.id) ? (
                         <button
-                          onClick={() => navigate('/classic-chats')}
+                          onClick={() => navigate('/messages')}
                           className="w-full py-2.5 rounded-lg bg-emerald-600/20 border border-emerald-500/30
                                    text-emerald-400 text-sm font-bold hover:bg-emerald-600/30 transition-colors"
                         >
                           ✅ Вы зарегистрированы · Открыть чат
                         </button>
+                      ) : timeLeft <= 0 ? (
+                        <div className="w-full py-2.5 rounded-lg bg-zinc-700/30 text-white/40 text-sm font-bold text-center">
+                          ⛔ Регистрация закрыта
+                        </div>
+                      ) : regCount >= tournament.maxParticipants ? (
+                        <div className="w-full py-2.5 rounded-lg bg-zinc-700/30 text-white/40 text-sm font-bold text-center">
+                          🚫 Турнир заполнен
+                        </div>
                       ) : (
                         <button
                           onClick={() => {
@@ -2722,6 +2749,7 @@ const GamePage = () => {
                   const timeLeft = new Date(tournament.startTime).getTime() - currentTime;
                   const hours = Math.floor(timeLeft / (1000 * 60 * 60));
                   const minutes = Math.floor((timeLeft % (1000 * 60 * 60)) / (1000 * 60));
+                  const seconds = Math.floor((timeLeft % (1000 * 60)) / 1000);
                   const cModeLabels: Record<string, string> = { SOLO: '👤 Solo', DUO: '👥 Duo', SQUAD: '🎯 Squad' };
                   const cModeColors: Record<string, string> = { SOLO: 'bg-purple-600', DUO: 'bg-cyan-600', SQUAD: 'bg-orange-600' };
                   const regCount = tournament.registeredPlayers ?? 0;
@@ -2750,27 +2778,51 @@ const GamePage = () => {
                       </div>
                       
                       {/* Tournament Info */}
-                      <div className="p-3 space-y-2.5">
+                      <div className={`p-3 space-y-2.5 ${timeLeft <= 0 && !myClassicTournamentIds.has(tournament.id) ? 'opacity-60' : ''}`}>
                         {/* Timer */}
-                        {timeLeft > 0 && (
+                        {timeLeft > 0 ? (
                         <div className="flex items-center gap-2 bg-yellow-500/10 rounded-lg px-2.5 py-2">
                           <span className="text-yellow-400 text-base">⏱️</span>
                           <div>
-                            <p className="text-xs text-white/50">Запуск через</p>
-                            <p className="text-sm font-bold text-yellow-400">{hours}ч {minutes}м</p>
+                            <p className="text-xs text-white/50">Старт через</p>
+                            <p className="text-sm font-bold text-yellow-400">{hours}ч {minutes}м {seconds}с</p>
                           </div>
+                        </div>
+                        ) : (
+                        <div className="bg-zinc-700/30 rounded-lg px-2.5 py-2 text-center">
+                          <p className="text-sm font-bold text-white/50">⛔ Регистрация завершена</p>
+                          {myClassicTournamentIds.has(tournament.id) && (
+                            <p className="text-xs text-emerald-400 mt-0.5">Вы зарегистрированы</p>
+                          )}
                         </div>
                         )}
                         
-                        {/* Entry & Prize */}
-                        <div className="grid grid-cols-2 gap-2">
-                          <div className="bg-white/5 rounded-lg py-2 text-center">
-                            <p className="text-xs text-white/50">Вход</p>
-                            <p className="text-sm font-bold text-white">{tournament.entryFee} UC</p>
-                          </div>
-                          <div className="bg-accent-green/10 rounded-lg py-2 text-center">
-                            <p className="text-xs text-white/50">Призовой</p>
-                            <p className="text-sm font-bold text-accent-green">{tournament.prizePool} UC</p>
+                        {/* Entry Fee */}
+                        <div className="bg-white/5 rounded-lg py-2 text-center">
+                          <p className="text-xs text-white/50">Вход</p>
+                          <p className="text-sm font-bold text-white">{tournament.entryFee} UC</p>
+                        </div>
+
+                        {/* Prizes per place */}
+                        <div className="bg-accent-green/10 rounded-lg p-2">
+                          <p className="text-xs text-white/50 mb-1 text-center">Призы</p>
+                          <div className="space-y-0.5">
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs text-white/60">🥇 1 место</span>
+                              <span className="text-xs font-bold text-accent-green">{tournament.prize1} UC</span>
+                            </div>
+                            {tournament.winnerCount >= 2 && (
+                              <div className="flex items-center justify-between">
+                                <span className="text-xs text-white/60">🥈 2 место</span>
+                                <span className="text-xs font-bold text-accent-green">{tournament.prize2} UC</span>
+                              </div>
+                            )}
+                            {tournament.winnerCount >= 3 && (
+                              <div className="flex items-center justify-between">
+                                <span className="text-xs text-white/60">🥉 3 место</span>
+                                <span className="text-xs font-bold text-accent-green">{tournament.prize3} UC</span>
+                              </div>
+                            )}
                           </div>
                         </div>
                         
@@ -2778,19 +2830,27 @@ const GamePage = () => {
                         <div className="flex items-center justify-between text-xs text-white/60">
                           <span>{regCount}/{tournament.maxParticipants} игроков</span>
                           <div className="w-16 h-1.5 bg-white/10 rounded-full overflow-hidden">
-                            <div className="h-full bg-purple-500 rounded-full" style={{ width: `${(regCount / tournament.maxParticipants) * 100}%` }} />
+                            <div className="h-full bg-purple-500 rounded-full" style={{ width: `${Math.min((regCount / tournament.maxParticipants) * 100, 100)}%` }} />
                           </div>
                         </div>
                         
-                        {/* Register Button / Already Registered */}
+                        {/* Register Button / Already Registered / Full / Expired */}
                         {myClassicTournamentIds.has(tournament.id) ? (
                           <button
-                            onClick={() => navigate('/classic-chats')}
+                            onClick={() => navigate('/messages')}
                             className="w-full py-2.5 rounded-xl bg-emerald-600/20 border border-emerald-500/30
                                      text-emerald-400 text-sm font-bold hover:bg-emerald-600/30 transition-colors"
                           >
                             ✅ Зарегистрирован · Чат
                           </button>
+                        ) : timeLeft <= 0 ? (
+                          <div className="w-full py-2.5 rounded-xl bg-zinc-700/30 text-white/40 text-sm font-bold text-center">
+                            ⛔ Регистрация закрыта
+                          </div>
+                        ) : regCount >= tournament.maxParticipants ? (
+                          <div className="w-full py-2.5 rounded-xl bg-zinc-700/30 text-white/40 text-sm font-bold text-center">
+                            🚫 Турнир заполнен
+                          </div>
                         ) : (
                           <button
                             onClick={() => {
@@ -2919,7 +2979,7 @@ const GamePage = () => {
                     setShowClassicRegistration(false);
                     loadClassicTournaments();
                     // Navigate to classic chats page after successful registration
-                    navigate(`/classic-chats/${result.registrationId}`);
+                    navigate(`/messages/classic-${result.registrationId}`);
                   } catch (e: any) {
                     setClassicRegError(e?.message || 'Ошибка регистрации');
                   }

@@ -440,19 +440,35 @@ router.post('/:id/register', async (req: Request, res: Response) => {
           tournament.winnerCount >= 3 ? `🥉 3 место: ${tournament.prize3} UC` : null,
         ].filter(Boolean).join('\n');
 
+        // Calculate countdown text instead of absolute time
+        const startMs = new Date(tournament.startTime).getTime();
+        const nowMs = Date.now();
+        const diffMs = startMs - nowMs;
+        let countdownText: string;
+        if (diffMs <= 0) {
+          countdownText = 'Скоро начнётся!';
+        } else {
+          const d = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+          const h = Math.floor((diffMs % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+          const m = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+          countdownText = (d > 0 ? `${d}д ` : '') + (h > 0 ? `${h}ч ` : '') + `${m}мин`;
+        }
+
         const welcomeMsg = [
           `🎮 Вы зарегистрированы на турнир!`,
           ``,
           `📍 Карта: ${tournament.map}`,
           `👥 Режим: ${tournament.mode}`,
           `🌍 Сервер: ${tournament.server}`,
-          `⏰ Старт: ${tournament.startTime.toLocaleString('ru-RU', { timeZone: 'UTC' })}`,
+          `⏱ Старт через: ${countdownText}`,
           `💰 Взнос: ${tournament.entryFee} UC`,
           ``,
           `🏆 Призы:`,
           prizeLines,
           ``,
           tournament.description ? `📝 ${tournament.description}` : null,
+          ``,
+          `📌 Важно! Добавьте администратора турнира в друзья в PUBG Mobile. Когда придёт время, администратор пригласит вас в комнату.`,
           ``,
           `💬 Это ваш приватный чат с администрацией турнира. Если у вас есть вопросы — пишите здесь.`,
         ].filter(v => v !== null).join('\n');

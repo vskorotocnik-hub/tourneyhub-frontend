@@ -252,6 +252,8 @@ export default function ClassicTournamentsPage() {
   const [showComplete, setShowComplete] = useState(false);
   const [winners, setWinners] = useState<{ registrationId: string; place: number }[]>([]);
   const [chatReg, setChatReg] = useState<ClassicRegistrationItem | null>(null);
+  const [broadcastText, setBroadcastText] = useState('');
+  const [broadcastSending, setBroadcastSending] = useState(false);
 
   const loadList = useCallback(async () => {
     setLoading(true);
@@ -411,7 +413,43 @@ export default function ClassicTournamentsPage() {
               </>)}
             </div>
           </div>
-          <div className="lg:col-span-2 bg-zinc-800/50 rounded-lg border border-zinc-700/50 flex flex-col" style={{ maxHeight: '75vh' }}>
+          <div className="lg:col-span-2 space-y-4">
+            {/* PUBG IDs Quick Copy */}
+            {detail.registrations.length > 0 && (
+              <div className="bg-yellow-500/5 rounded-lg border border-yellow-500/20 p-4">
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="text-sm font-semibold text-yellow-400">📋 PUBG ID</h3>
+                  <button onClick={() => { navigator.clipboard.writeText(detail.registrations.flatMap(r => r.pubgIds).join('\n')); alert('Скопировано!'); }}
+                    className="px-3 py-1 rounded-lg bg-yellow-600/20 text-yellow-400 text-xs hover:bg-yellow-600/30">Копировать все</button>
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {detail.registrations.map(r => r.pubgIds.map(pid => (
+                    <button key={`${r.id}-${pid}`} onClick={() => navigator.clipboard.writeText(pid)}
+                      className="px-2 py-0.5 bg-zinc-800 rounded border border-zinc-700 text-xs text-white font-mono hover:bg-zinc-700" title="Копировать">{pid}</button>
+                  )))}
+                </div>
+              </div>
+            )}
+            {/* Broadcast */}
+            {detail.registrations.length > 0 && (detail.status === 'REGISTRATION' || detail.status === 'IN_PROGRESS') && (
+              <div className="bg-zinc-800/50 rounded-lg border border-zinc-700/50 p-4">
+                <h3 className="text-sm font-semibold text-white mb-2">📢 Отправить всем</h3>
+                <textarea value={broadcastText} onChange={e => setBroadcastText(e.target.value)} rows={2}
+                  placeholder="Room ID: 12345, Password: 678..."
+                  className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-xs text-white placeholder-zinc-500 outline-none resize-none mb-2" />
+                <button onClick={async () => {
+                  if (!broadcastText.trim()) return;
+                  setBroadcastSending(true);
+                  try { const r = await classicApi.broadcast(detail.id, broadcastText.trim()); alert(`Отправлено ${r.sent} участникам`); setBroadcastText(''); } catch (e: any) { alert(e?.message || 'Ошибка'); }
+                  setBroadcastSending(false);
+                }} disabled={broadcastSending || !broadcastText.trim()}
+                  className="px-4 py-2 rounded-lg bg-blue-600 text-white text-xs font-medium hover:bg-blue-700 disabled:opacity-50">
+                  {broadcastSending ? 'Отправка...' : '📤 Отправить всем'}
+                </button>
+              </div>
+            )}
+            {/* Participants */}
+            <div className="bg-zinc-800/50 rounded-lg border border-zinc-700/50 flex flex-col" style={{ maxHeight: '55vh' }}>
             <div className="px-4 py-3 border-b border-zinc-700/50 shrink-0">
               <h3 className="text-sm font-semibold text-white">Участники <span className="text-zinc-500 font-normal">({detail.registrations.length})</span></h3>
             </div>
@@ -433,6 +471,7 @@ export default function ClassicTournamentsPage() {
                 </div>
               ))}
             </div>
+          </div>
           </div>
         </div>
 

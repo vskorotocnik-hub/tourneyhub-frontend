@@ -982,6 +982,47 @@ router.post('/classic/registrations/:regId/messages', async (req: Request, res: 
   }
 });
 
+// Broadcast message to ALL registrations of a classic tournament
+const classicBroadcastSchema = z.object({
+  content: z.string().min(1).max(2000),
+});
+
+router.post('/classic/:id/broadcast', async (req: Request, res: Response) => {
+  try {
+    const { content } = classicBroadcastSchema.parse(req.body);
+    const adminId = req.user!.userId;
+    const tournamentId = req.params.id as string;
+
+    const regs = await prisma.classicRegistration.findMany({
+      where: { tournamentId },
+      select: { id: true },
+    });
+
+    if (regs.length === 0) {
+      res.status(400).json({ error: 'Нет регистраций' });
+      return;
+    }
+
+    await prisma.classicMessage.createMany({
+      data: regs.map(r => ({
+        registrationId: r.id,
+        userId: adminId,
+        content,
+        isAdmin: true,
+      })),
+    });
+
+    res.json({ sent: regs.length });
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      res.status(400).json({ error: 'Неверные данные' });
+      return;
+    }
+    console.error('Admin classic broadcast error:', err);
+    res.status(500).json({ error: 'Ошибка сервера' });
+  }
+});
+
 // Get classic tournament detail with registrations
 router.get('/classic/:id', async (req: Request, res: Response) => {
   try {

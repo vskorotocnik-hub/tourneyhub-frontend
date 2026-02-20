@@ -2,7 +2,7 @@
  * Chat entity types
  */
 
-export type ChatType = 'tournament' | 'support';
+export type ChatType = 'tournament' | 'support' | 'classic';
 export type MessageType = 'user' | 'admin' | 'system' | 'support';
 export type MatchResult = 'win' | 'lose' | 'dispute' | null;
 

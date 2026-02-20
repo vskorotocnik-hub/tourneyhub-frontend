@@ -468,6 +468,9 @@ export const classicApi = {
 
   sendMessage: (regId: string, content: string) =>
     apiFetch<ClassicMessageItem>(`/api/admin/classic/registrations/${regId}/messages`, { method: 'POST', body: { content } }),
+
+  broadcast: (id: string, content: string) =>
+    apiFetch<{ sent: number }>(`/api/admin/classic/${id}/broadcast`, { method: 'POST', body: { content } }),
 };
 
 // ─── WOW MAP API ────────────────────────────────────────────

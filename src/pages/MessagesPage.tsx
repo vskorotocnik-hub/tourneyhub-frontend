@@ -1,11 +1,30 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { tournamentApi, supportApi, type TournamentChatItem } from '../lib/api';
+import { tournamentApi, supportApi, classicApi, type TournamentChatItem, type ClassicChatListItem } from '../lib/api';
 import { getSocket } from '../lib/socket';
 import type { Chat } from '../types';
 
 type ChatFilter = 'all' | 'active' | 'completed';
+
+const classicStatusLabels: Record<string, string> = {
+  REGISTRATION: 'Регистрация', IN_PROGRESS: 'Идёт', COMPLETED: 'Завершён', CANCELLED: 'Отменён',
+};
+const classicModeLabels: Record<string, string> = { SOLO: 'Solo', DUO: 'Duo', SQUAD: 'Squad' };
+
+function classicChatToChat(c: ClassicChatListItem): Chat {
+  return {
+    id: `classic-${c.registrationId}`,
+    type: 'classic',
+    title: `🏆 ${c.tournament.title || c.tournament.map}`,
+    subtitle: `${classicModeLabels[c.tournament.mode] || c.tournament.mode} • ${classicStatusLabels[c.tournament.status] || c.tournament.status}`,
+    lastMessage: c.lastMessage?.content || 'Чат турнира',
+    lastMessageTime: c.lastMessage ? new Date(c.lastMessage.createdAt) : undefined,
+    unreadCount: c.unreadCount || 0,
+    tournamentStatus: c.tournament.status,
+    isResultSubmitted: c.tournament.status === 'COMPLETED' || c.tournament.status === 'CANCELLED',
+  };
+}
 
 const defaultSupportChat: Chat = {
   id: 'support',
@@ -40,6 +59,7 @@ const MessagesPage = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
   const [tournamentChats, setTournamentChats] = useState<Chat[]>([]);
+  const [classicChats, setClassicChats] = useState<Chat[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<ChatFilter>('all');
 
@@ -48,15 +68,18 @@ const MessagesPage = () => {
     tournamentApi.myChats()
       .then(res => setTournamentChats(res.chats.map(apiChatToChat)))
       .catch(() => {});
+    classicApi.myChats()
+      .then(res => setClassicChats(res.chats.map(classicChatToChat)))
+      .catch(() => {});
   }, [user]);
 
   useEffect(() => {
     if (!user) return;
     setLoading(true);
-    tournamentApi.myChats()
-      .then(res => setTournamentChats(res.chats.map(apiChatToChat)))
-      .catch(() => {})
-      .finally(() => setLoading(false));
+    Promise.all([
+      tournamentApi.myChats().then(res => setTournamentChats(res.chats.map(apiChatToChat))).catch(() => {}),
+      classicApi.myChats().then(res => setClassicChats(res.chats.map(classicChatToChat))).catch(() => {}),
+    ]).finally(() => setLoading(false));
   }, [user]);
 
   // Real-time: refresh chat list when tournaments change or new messages arrive
@@ -76,7 +99,8 @@ const MessagesPage = () => {
   }, [loadChats]);
 
   // Filter chats based on tab
-  const filteredTournamentChats = tournamentChats.filter(c => {
+  const allTournamentChats = [...tournamentChats, ...classicChats];
+  const filteredTournamentChats = allTournamentChats.filter(c => {
     if (filter === 'all') return true;
     if (filter === 'active') return !c.isResultSubmitted;
     return c.isResultSubmitted; // completed
@@ -100,7 +124,7 @@ const MessagesPage = () => {
   }, [user]);
 
   const allChats = [supportChat, ...filteredTournamentChats];
-  const totalUnread = tournamentChats.reduce((sum, c) => sum + (c.unreadCount || 0), 0);
+  const totalUnread = allTournamentChats.reduce((sum, c) => sum + (c.unreadCount || 0), 0);
 
   const formatTime = (date?: Date) => {
     if (!date) return '';
@@ -173,6 +197,10 @@ const MessagesPage = () => {
               {c.type === 'support' ? (
                 <div className="w-11 h-11 rounded-full bg-gradient-to-br from-emerald-500 to-teal-500 flex items-center justify-center text-lg">
                   🎧
+                </div>
+              ) : c.type === 'classic' ? (
+                <div className="w-11 h-11 rounded-full bg-gradient-to-br from-amber-500 to-orange-500 flex items-center justify-center text-lg">
+                  🏆
                 </div>
               ) : (
                 <div className="w-11 h-11 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center text-lg">

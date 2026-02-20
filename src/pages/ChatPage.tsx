@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import MessageBubble from '../components/MessageBubble';
 import type { Chat, ChatMessage } from '../types';
 import { useAuth } from '../context/AuthContext';
-import { tournamentApi, supportApi, type TournamentChatItem, type TournamentDetail, type Dispute, type SupportMessageItem } from '../lib/api';
+import { tournamentApi, supportApi, classicApi, type TournamentChatItem, type TournamentDetail, type Dispute, type SupportMessageItem, type ClassicChatListItem } from '../lib/api';
 import { getSocket, joinTournament, leaveTournament } from '../lib/socket';
 
 const defaultSupportChat: Chat = {
@@ -14,6 +14,21 @@ const defaultSupportChat: Chat = {
 };
 
 type ChatFilter = 'all' | 'active' | 'completed';
+
+function classicToChat(c: ClassicChatListItem): Chat {
+  const sl: Record<string,string> = { REGISTRATION:'Регистрация', IN_PROGRESS:'Идёт', COMPLETED:'Завершён', CANCELLED:'Отменён' };
+  const ml: Record<string,string> = { SOLO:'Solo', DUO:'Duo', SQUAD:'Squad' };
+  return {
+    id: `classic-${c.registrationId}`, type: 'classic',
+    title: `🏆 ${c.tournament.title || c.tournament.map}`,
+    subtitle: `${ml[c.tournament.mode]||c.tournament.mode} • ${sl[c.tournament.status]||c.tournament.status}`,
+    lastMessage: c.lastMessage?.content || 'Чат турнира',
+    lastMessageTime: c.lastMessage ? new Date(c.lastMessage.createdAt) : undefined,
+    unreadCount: c.unreadCount || 0,
+    tournamentStatus: c.tournament.status,
+    isResultSubmitted: c.tournament.status === 'COMPLETED' || c.tournament.status === 'CANCELLED',
+  };
+}
 
 function apiToChat(c: TournamentChatItem): Chat {
   return {
@@ -54,6 +69,8 @@ const ChatPage = () => {
 
   const isRealTournament = chatId?.startsWith('t-');
   const realTournamentId = isRealTournament ? chatId!.substring(2) : null;
+  const isClassicChat = chatId?.startsWith('classic-');
+  const classicRegId = isClassicChat ? chatId!.substring(8) : null;
 
   // Helper: map API message to ChatMessage
   const mapMsg = useCallback((m: import('../lib/api').TournamentMessage, cId: string): ChatMessage => ({
@@ -69,9 +86,12 @@ const ChatPage = () => {
   // Load sidebar chats from API — reload on user change and chatId change
   const loadSidebarChats = useCallback(() => {
     if (!user) return;
-    tournamentApi.myChats()
-      .then(res => setSidebarChats([defaultSupportChat, ...res.chats.map(apiToChat)]))
-      .catch(() => {});
+    Promise.all([
+      tournamentApi.myChats().catch(() => ({ chats: [] as TournamentChatItem[] })),
+      classicApi.myChats().catch(() => ({ chats: [] as ClassicChatListItem[] })),
+    ]).then(([tdm, classic]) => {
+      setSidebarChats([defaultSupportChat, ...tdm.chats.map(apiToChat), ...classic.chats.map(classicToChat)]);
+    });
   }, [user]);
 
   useEffect(() => {
@@ -98,12 +118,25 @@ const ChatPage = () => {
     setDisputes([]);
   }, [chatId]);
 
+  // Helper: map classic API message to ChatMessage
+  const mapClassicMsg = useCallback((m: import('../lib/api').ClassicMessageItem, cId: string): ChatMessage => ({
+    id: m.id, chatId: cId, content: m.content,
+    type: m.isAdmin ? 'admin' : m.isSystem ? 'system' : 'user',
+    senderId: m.isSystem ? 'system' : m.userId,
+    senderName: m.isAdmin ? 'Администратор' : m.isSystem ? 'Система' : 'Вы',
+    timestamp: new Date(m.createdAt),
+  }), []);
+
   // Load messages
   useEffect(() => {
     if (!chatId) return;
     if (isRealTournament && realTournamentId) {
       tournamentApi.getMessages(realTournamentId).then(data => {
         setMessages(data.messages.map(m => mapMsg(m, chatId)));
+      }).catch(() => setMessages([]));
+    } else if (isClassicChat && classicRegId) {
+      classicApi.getMessages(classicRegId).then(data => {
+        setMessages(data.messages.map(m => mapClassicMsg(m, chatId)));
       }).catch(() => setMessages([]));
     } else if (chatId === 'support') {
       supportApi.getMessages().then(data => {
@@ -119,7 +152,7 @@ const ChatPage = () => {
     } else {
       setMessages([]);
     }
-  }, [chatId, isRealTournament, realTournamentId, mapMsg]);
+  }, [chatId, isRealTournament, realTournamentId, isClassicChat, classicRegId, mapMsg, mapClassicMsg]);
 
   // Load tournament detail + disputes + mark as read + clear unread in sidebar
   useEffect(() => {
@@ -188,6 +221,17 @@ const ChatPage = () => {
     return () => clearInterval(iv);
   }, [isRealTournament, realTournamentId, chatId, mapMsg]);
 
+  // Classic chat polling
+  useEffect(() => {
+    if (!isClassicChat || !classicRegId || !chatId) return;
+    const iv = setInterval(() => {
+      classicApi.getMessages(classicRegId).then(data => {
+        setMessages(data.messages.map(m => mapClassicMsg(m, chatId)));
+      }).catch(() => {});
+    }, 10000);
+    return () => clearInterval(iv);
+  }, [isClassicChat, classicRegId, chatId, mapClassicMsg]);
+
   const chat = sidebarChats.find(c => c.id === chatId);
   const messagesLength = messages.length;
 
@@ -208,6 +252,12 @@ const ChatPage = () => {
           senderAvatar: m.user.avatar || undefined,
           timestamp: new Date(m.createdAt),
         }]);
+      }).catch(() => {});
+    } else if (isClassicChat && classicRegId) {
+      const text = inputValue.trim();
+      setInputValue('');
+      classicApi.sendMessage(classicRegId, text).then(m => {
+        setMessages(prev => [...prev, mapClassicMsg(m, chatId!)]);
       }).catch(() => {});
     } else if (chatId === 'support') {
       const text = inputValue.trim();
@@ -232,7 +282,7 @@ const ChatPage = () => {
     } else {
       setInputValue('');
     }
-  }, [inputValue, isRealTournament, realTournamentId, chatId, user]);
+  }, [inputValue, isRealTournament, realTournamentId, isClassicChat, classicRegId, chatId, user, mapClassicMsg]);
 
   // Determine active match where USER's team is playing (important for 4-team tournaments with 2 simultaneous matches)
   const userTeamId = tournamentDetail?.userTeamId;
@@ -412,6 +462,14 @@ const ChatPage = () => {
 
   const getStatusBadge = (c: Chat) => {
     if (c.type === 'support') return <span className="text-xs px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400">Онлайн</span>;
+    if (c.type === 'classic') {
+      const st = c.tournamentStatus;
+      if (st === 'REGISTRATION') return <span className="text-xs px-1.5 py-0.5 rounded-full bg-blue-500/20 text-blue-400">Регистрация</span>;
+      if (st === 'IN_PROGRESS') return <span className="text-xs px-1.5 py-0.5 rounded-full bg-yellow-500/20 text-yellow-400">Идёт</span>;
+      if (st === 'COMPLETED') return <span className="text-xs px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400">Завершён</span>;
+      if (st === 'CANCELLED') return <span className="text-xs px-1.5 py-0.5 rounded-full bg-zinc-500/20 text-zinc-400">Отменён</span>;
+      return null;
+    }
     if (c.matchResult === 'win') return <span className="text-xs px-1.5 py-0.5 rounded-full bg-accent-green/20 text-accent-green">Победа</span>;
     if (c.matchResult === 'lose') return <span className="text-xs px-1.5 py-0.5 rounded-full bg-red-500/20 text-red-400">Поражение</span>;
     if (c.matchResult === 'dispute') return <span className="text-xs px-1.5 py-0.5 rounded-full bg-yellow-500/20 text-yellow-400">Спор</span>;
@@ -419,6 +477,7 @@ const ChatPage = () => {
   };
 
   const isTournament = chat?.type === 'tournament';
+  const isClassic = chat?.type === 'classic';
 
   /* ====== CHAT PANEL (reused for both mobile and desktop) ====== */
   const chatPanel = chat ? (
@@ -443,6 +502,7 @@ const ChatPage = () => {
               <h1 className="text-base font-semibold text-white truncate">{chat.title}</h1>
               <p className="text-xs text-white/50">{chat.subtitle}</p>
               {isTournament && <p className="text-[10px] text-purple-400/70 mt-0.5">Нажмите для перехода к турниру →</p>}
+              {isClassic && <p className="text-[10px] text-amber-400/70 mt-0.5">Чат с администрацией турнира</p>}
               {chat.type === 'support' && <p className="text-[10px] text-emerald-400/70 mt-0.5">● Онлайн</p>}
             </div>
 
@@ -787,6 +847,10 @@ const ChatPage = () => {
               {c.type === 'support' ? (
                 <div className="w-11 h-11 rounded-full bg-gradient-to-br from-emerald-500 to-teal-500 flex items-center justify-center text-lg">
                   🎧
+                </div>
+              ) : c.type === 'classic' ? (
+                <div className="w-11 h-11 rounded-full bg-gradient-to-br from-amber-500 to-orange-500 flex items-center justify-center text-lg">
+                  🏆
                 </div>
               ) : (
                 <div className="w-11 h-11 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center text-lg">
