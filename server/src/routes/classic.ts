@@ -219,25 +219,32 @@ router.get('/my/chats', async (req: Request, res: Response) => {
     });
 
     const chats = await Promise.all(regs.map(async (r: any) => {
-      const unreadCount = await prisma.classicMessage.count({
-        where: {
-          registrationId: r.id,
-          createdAt: { gt: r.lastReadAt },
-        },
-      });
+      const [unreadCount, messageCount] = await Promise.all([
+        prisma.classicMessage.count({
+          where: {
+            registrationId: r.id,
+            createdAt: { gt: r.lastReadAt },
+          },
+        }),
+        prisma.classicMessage.count({
+          where: { registrationId: r.id },
+        }),
+      ]);
 
       const lastMsg = r.messages[0] || null;
 
       return {
         registrationId: r.id,
-        tournamentId: r.tournament.id,
-        title: r.tournament.title || `${r.tournament.map} ${r.tournament.mode}`,
-        map: r.tournament.map,
-        mode: r.tournament.mode,
-        status: r.tournament.status,
-        place: r.place,
-        lastMessage: lastMsg ? { content: lastMsg.content, createdAt: lastMsg.createdAt, isSystem: lastMsg.isSystem } : null,
+        tournament: {
+          id: r.tournament.id,
+          title: r.tournament.title,
+          map: r.tournament.map,
+          mode: r.tournament.mode,
+          status: r.tournament.status,
+        },
+        messageCount,
         unreadCount,
+        lastMessage: lastMsg ? { content: lastMsg.content, createdAt: lastMsg.createdAt, isAdmin: !!lastMsg.isAdmin } : null,
       };
     }));
 
