@@ -78,9 +78,11 @@ async function refreshAccessToken(): Promise<AuthTokens | null> {
 
 export class ApiError extends Error {
   status: number;
-  constructor(status: number, message: string) {
+  details?: Record<string, string[]>;
+  constructor(status: number, message: string, details?: Record<string, string[]>) {
     super(message);
     this.status = status;
+    this.details = details;
     this.name = 'ApiError';
   }
 }
@@ -122,8 +124,16 @@ export async function apiFetch<T = unknown>(
 
   if (!res.ok) {
     const error = await res.json().catch(() => ({ error: 'Ошибка сервера' }));
-    const msg = error.debug ? `${error.error}: ${error.debug}` : (error.error || 'Ошибка сервера');
-    throw new ApiError(res.status, msg);
+    let msg = error.debug ? `${error.error}: ${error.debug}` : (error.error || 'Ошибка сервера');
+    // Append field-level validation details if present
+    if (error.details && typeof error.details === 'object') {
+      const fieldErrors = Object.entries(error.details)
+        .filter(([, v]) => Array.isArray(v) && (v as string[]).length > 0)
+        .map(([field, errs]) => `• ${field}: ${(errs as string[]).join(', ')}`)
+        .join('\n');
+      if (fieldErrors) msg = `${msg}\n${fieldErrors}`;
+    }
+    throw new ApiError(res.status, msg, error.details);
   }
 
   return res.json();

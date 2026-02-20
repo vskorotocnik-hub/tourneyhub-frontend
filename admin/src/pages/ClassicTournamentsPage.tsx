@@ -10,8 +10,16 @@ const statusLabels: Record<string, { label: string; color: string }> = {
 
 const modeLabels: Record<string, string> = { SOLO: 'Соло', DUO: 'Дуо', SQUAD: 'Сквад' };
 
+const serverOptions = [
+  { value: 'EUROPE', label: 'Европа' },
+  { value: 'NA', label: 'Сев. Америка' },
+  { value: 'ASIA', label: 'Азия' },
+  { value: 'ME', label: 'Ближний Восток' },
+  { value: 'SA', label: 'Юж. Америка' },
+];
+
 const emptyForm = {
-  title: '', description: '', map: '', mapImage: '', mode: 'SOLO', server: '',
+  title: '', description: '', map: '', mapImage: '', mode: 'SOLO', server: 'EUROPE',
   startTime: '', entryFee: 0, prizePool: 0, maxParticipants: 100,
   winnerCount: 1, prize1: 0, prize2: 0, prize3: 0,
 };
@@ -111,7 +119,7 @@ function FormModal({ form, setForm, editingId, saving, formError, onSave, onClos
     <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4" onClick={onClose}>
       <div className="bg-zinc-900 rounded-xl border border-zinc-700 w-full max-w-2xl max-h-[90vh] overflow-y-auto p-6" onClick={e => e.stopPropagation()}>
         <h2 className="text-lg font-bold text-white mb-4">{editingId ? 'Редактировать турнир' : 'Новый Classic турнир'}</h2>
-        {formError && <div className="mb-3 px-3 py-2 bg-red-500/10 border border-red-500/30 rounded-lg text-xs text-red-400">{formError}</div>}
+        {formError && <div className="mb-3 px-3 py-2 bg-red-500/10 border border-red-500/30 rounded-lg text-xs text-red-400 whitespace-pre-wrap">{formError}</div>}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <div className="md:col-span-2">
             <label className="text-[11px] text-zinc-500 uppercase tracking-wider">Название</label>
@@ -142,8 +150,10 @@ function FormModal({ form, setForm, editingId, saving, formError, onSave, onClos
           </div>
           <div>
             <label className="text-[11px] text-zinc-500 uppercase tracking-wider">Сервер *</label>
-            <input value={form.server} onChange={e => upd('server', e.target.value)} placeholder="Europe, Asia..."
-              className="w-full mt-1 bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-emerald-600/50" />
+            <select value={form.server} onChange={e => upd('server', e.target.value)}
+              className="w-full mt-1 bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white outline-none">
+              {serverOptions.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
+            </select>
           </div>
           <div>
             <label className="text-[11px] text-zinc-500 uppercase tracking-wider">Время старта *</label>
@@ -274,7 +284,9 @@ export default function ClassicTournamentsPage() {
       else await classicApi.create(body);
       setShowForm(false); loadList();
       if (editingId && detail) refreshDetail();
-    } catch (e: any) { setFormError(e?.message || 'Ошибка'); }
+    } catch (e: any) {
+      setFormError(e?.message || 'Ошибка');
+    }
     setSaving(false);
   };
 
