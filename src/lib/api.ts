@@ -523,8 +523,8 @@ export interface ClassicTournamentListItem {
   prize2: number;
   prize3: number;
   status: string;
-  createdAt: string;
-  _count: { registrations: number };
+  createdAt?: string;
+  registeredPlayers: number;
 }
 
 export interface ClassicTournamentDetailResponse {

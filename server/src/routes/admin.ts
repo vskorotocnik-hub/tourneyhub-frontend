@@ -819,7 +819,8 @@ const classicCreateSchema = z.object({
   title: z.string().max(200).optional(),
   description: z.string().max(1000).optional(),
   map: z.string().min(1).max(100),
-  mapImage: z.string().url().optional(),
+  mapImage: z.string().optional(),
+  imageData: z.string().optional(),
   mode: z.enum(['SOLO', 'DUO', 'SQUAD']),
   server: z.enum(['EUROPE', 'NA', 'ASIA', 'ME', 'SA']),
   startTime: z.string().datetime(),
@@ -838,12 +839,18 @@ router.post('/classic', async (req: Request, res: Response) => {
     const data = classicCreateSchema.parse(req.body);
     const adminId = req.user!.userId;
 
+    // Handle image upload
+    let mapImageUrl = data.mapImage || null;
+    if (data.imageData) {
+      mapImageUrl = await uploadImage(data.imageData, 'classic-maps');
+    }
+
     const tournament = await prisma.classicTournament.create({
       data: {
         title: data.title,
         description: data.description,
         map: data.map,
-        mapImage: data.mapImage,
+        mapImage: mapImageUrl,
         mode: data.mode,
         server: data.server,
         startTime: new Date(data.startTime),
@@ -1009,7 +1016,8 @@ const classicUpdateSchema = z.object({
   title: z.string().max(200).optional(),
   description: z.string().max(1000).optional(),
   map: z.string().min(1).max(100).optional(),
-  mapImage: z.string().url().optional().nullable(),
+  mapImage: z.string().optional().nullable(),
+  imageData: z.string().optional(),
   mode: z.enum(['SOLO', 'DUO', 'SQUAD']).optional(),
   server: z.enum(['EUROPE', 'NA', 'ASIA', 'ME', 'SA']).optional(),
   startTime: z.string().datetime().optional(),
@@ -1031,6 +1039,10 @@ router.put('/classic/:id', async (req: Request, res: Response) => {
     if (tournament.status === 'COMPLETED') { res.status(400).json({ error: 'Нельзя редактировать завершённый турнир' }); return; }
 
     const updateData: Record<string, unknown> = { ...data };
+    delete updateData.imageData;
+    if (data.imageData) {
+      updateData.mapImage = await uploadImage(data.imageData, 'classic-maps');
+    }
     if (data.startTime) updateData.startTime = new Date(data.startTime);
 
     const updated = await prisma.classicTournament.update({

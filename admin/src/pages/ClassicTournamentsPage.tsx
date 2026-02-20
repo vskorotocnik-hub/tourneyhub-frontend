@@ -115,6 +115,20 @@ function FormModal({ form, setForm, editingId, saving, formError, onSave, onClos
   saving: boolean; formError: string; onSave: () => void; onClose: () => void;
 }) {
   const upd = (key: keyof FormData, val: string | number) => setForm({ ...form, [key]: val });
+  const [imagePreview, setImagePreview] = useState<string>(form.mapImage || '');
+  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/')) return;
+    if (file.size > 5 * 1024 * 1024) { alert('Максимум 5 МБ'); return; }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const base64 = reader.result as string;
+      setImagePreview(base64);
+      setForm({ ...form, mapImage: base64 });
+    };
+    reader.readAsDataURL(file);
+  };
   return (
     <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4" onClick={onClose}>
       <div className="bg-zinc-900 rounded-xl border border-zinc-700 w-full max-w-2xl max-h-[90vh] overflow-y-auto p-6" onClick={e => e.stopPropagation()}>
@@ -137,9 +151,18 @@ function FormModal({ form, setForm, editingId, saving, formError, onSave, onClos
               className="w-full mt-1 bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-emerald-600/50" />
           </div>
           <div>
-            <label className="text-[11px] text-zinc-500 uppercase tracking-wider">Картинка карты (URL)</label>
-            <input value={form.mapImage} onChange={e => upd('mapImage', e.target.value)} placeholder="https://..."
-              className="w-full mt-1 bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-emerald-600/50" />
+            <label className="text-[11px] text-zinc-500 uppercase tracking-wider">Картинка карты</label>
+            <div className="mt-1 flex items-center gap-3">
+              {imagePreview && (
+                <div className="relative w-24 h-16 rounded-lg overflow-hidden border border-zinc-600 shrink-0">
+                  <img src={imagePreview} alt="Preview" className="w-full h-full object-cover" />
+                </div>
+              )}
+              <label className="cursor-pointer px-3 py-2 bg-zinc-700 hover:bg-zinc-600 border border-zinc-600 rounded-lg text-xs text-white transition-colors">
+                📷 {imagePreview ? 'Заменить' : 'Загрузить'}
+                <input type="file" accept="image/*" onChange={handleImageChange} className="hidden" />
+              </label>
+            </div>
           </div>
           <div>
             <label className="text-[11px] text-zinc-500 uppercase tracking-wider">Режим *</label>
@@ -279,7 +302,13 @@ export default function ClassicTournamentsPage() {
       };
       if (!body.title) delete body.title;
       if (!body.description) delete body.description;
-      if (!body.mapImage) delete body.mapImage;
+      // Handle image: if mapImage is base64, send as imageData for server upload
+      if (typeof body.mapImage === 'string' && (body.mapImage as string).startsWith('data:image/')) {
+        body.imageData = body.mapImage;
+        delete body.mapImage;
+      } else if (!body.mapImage) {
+        delete body.mapImage;
+      }
       if (editingId) await classicApi.update(editingId, body);
       else await classicApi.create(body);
       setShowForm(false); loadList();

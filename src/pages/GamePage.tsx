@@ -1873,7 +1873,7 @@ const GamePage = () => {
                 const seconds = Math.floor((timeLeft % (1000 * 60)) / 1000);
                 const cModeLabels: Record<string, string> = { SOLO: '👤 Solo', DUO: '👥 Duo', SQUAD: '🎯 Squad' };
                 const cModeColors: Record<string, string> = { SOLO: 'bg-purple-600', DUO: 'bg-cyan-600', SQUAD: 'bg-orange-600' };
-                const regCount = tournament._count.registrations;
+                const regCount = tournament.registeredPlayers ?? 0;
                 
                 return (
                   <div 
@@ -2707,7 +2707,7 @@ const GamePage = () => {
                   const minutes = Math.floor((timeLeft % (1000 * 60 * 60)) / (1000 * 60));
                   const cModeLabels: Record<string, string> = { SOLO: '👤 Solo', DUO: '👥 Duo', SQUAD: '🎯 Squad' };
                   const cModeColors: Record<string, string> = { SOLO: 'bg-purple-600', DUO: 'bg-cyan-600', SQUAD: 'bg-orange-600' };
-                  const regCount = tournament._count.registrations;
+                  const regCount = tournament.registeredPlayers ?? 0;
                   
                   return (
                     <div 
