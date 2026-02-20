@@ -278,7 +278,7 @@ export default function ClassicTournamentsPage() {
     setSaving(false);
   };
 
-  const handleAction = async (action: string, id: string, confirmMsg: string, apiFn: () => Promise<unknown>) => {
+  const handleAction = async (action: string, _id: string, confirmMsg: string, apiFn: () => Promise<unknown>) => {
     if (!confirm(confirmMsg)) return;
     setActionLoading(action);
     try { await apiFn(); await refreshDetail(); loadList(); } catch (e: any) { alert(e?.message || 'Ошибка'); }
