@@ -68,12 +68,12 @@ const ClassicChatsPage = () => {
     setLoading(true);
     Promise.all([
       classicApi.myChats().catch(() => ({ chats: [] })),
-      classicApi.myActive().catch(() => ({ registrations: [] })),
-      classicApi.myHistory().catch(() => ({ registrations: [] })),
+      classicApi.myActive().catch(() => ({ tournaments: [] })),
+      classicApi.myHistory().catch(() => ({ tournaments: [] })),
     ]).then(([chatRes, activeRes, histRes]) => {
       setChats(chatRes.chats);
-      setActiveRegs(activeRes.registrations);
-      setHistoryRegs(histRes.registrations);
+      setActiveRegs(activeRes.tournaments);
+      setHistoryRegs(histRes.tournaments);
     }).finally(() => setLoading(false));
   }, [user]);
 
@@ -204,19 +204,19 @@ const ClassicChatsPage = () => {
           ) : (
             activeRegs.map((r: any) => (
               <button
-                key={r.id}
-                onClick={() => navigate(`/classic-chats/${r.id}`)}
+                key={r.registrationId}
+                onClick={() => navigate(`/classic-chats/${r.registrationId}`)}
                 className="w-full flex items-center gap-3 px-4 py-3 hover:bg-white/5 transition-colors text-left border-b border-white/5"
               >
                 <div className="w-11 h-11 rounded-full bg-gradient-to-br from-emerald-500 to-teal-500 flex items-center justify-center text-lg shrink-0">
                   🎮
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold text-white truncate">{r.tournament?.title || r.tournament?.map || 'Турнир'}</p>
+                  <p className="text-sm font-semibold text-white truncate">{r.title || r.map || 'Турнир'}</p>
                   <p className="text-xs text-white/40 mt-0.5">
-                    {modeLabels[r.tournament?.mode] || ''} • {statusLabels[r.tournament?.status] || r.tournament?.status}
+                    {modeLabels[r.mode] || ''} • {statusLabels[r.status] || r.status}
                   </p>
-                  <p className="text-xs text-yellow-400/80 mt-0.5">Взнос: {r.tournament?.entryFee} UC • Приз: {r.tournament?.prizePool} UC</p>
+                  <p className="text-xs text-yellow-400/80 mt-0.5">Взнос: {r.entryFee} UC • Приз: {r.prizePool} UC</p>
                 </div>
               </button>
             ))
@@ -230,31 +230,31 @@ const ClassicChatsPage = () => {
           ) : (
             historyRegs.map((r: any) => (
               <div
-                key={r.id}
+                key={r.registrationId}
                 className="flex items-center gap-3 px-4 py-3 border-b border-white/5"
               >
                 <div className={`w-11 h-11 rounded-full flex items-center justify-center text-lg shrink-0 ${
                   r.place && r.place <= 3
                     ? 'bg-gradient-to-br from-yellow-500 to-orange-500'
-                    : r.tournament?.status === 'CANCELLED'
+                    : r.status === 'CANCELLED'
                     ? 'bg-gradient-to-br from-zinc-600 to-zinc-700'
                     : 'bg-gradient-to-br from-zinc-700 to-zinc-800'
                 }`}>
-                  {r.place === 1 ? '🥇' : r.place === 2 ? '🥈' : r.place === 3 ? '🥉' : r.tournament?.status === 'CANCELLED' ? '❌' : '🏁'}
+                  {r.place === 1 ? '🥇' : r.place === 2 ? '🥈' : r.place === 3 ? '🥉' : r.status === 'CANCELLED' ? '❌' : '🏁'}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold text-white truncate">{r.tournament?.title || r.tournament?.map || 'Турнир'}</p>
+                  <p className="text-sm font-semibold text-white truncate">{r.title || r.map || 'Турнир'}</p>
                   <p className="text-xs text-white/40 mt-0.5">
-                    {modeLabels[r.tournament?.mode] || ''} • {statusLabels[r.tournament?.status] || ''}
+                    {modeLabels[r.mode] || ''} • {statusLabels[r.status] || ''}
                   </p>
                   {r.place && (
                     <p className="text-xs text-yellow-400 mt-0.5">Место: {r.place} • Приз: {r.prizeAmount} UC</p>
                   )}
-                  {r.tournament?.status === 'CANCELLED' && (
-                    <p className="text-xs text-zinc-500 mt-0.5">Турнир отменён (возврат {r.tournament?.entryFee} UC)</p>
+                  {r.status === 'CANCELLED' && (
+                    <p className="text-xs text-zinc-500 mt-0.5">Турнир отменён (возврат {r.entryFee} UC)</p>
                   )}
                 </div>
-                <span className="text-xs text-white/30 shrink-0">{formatTime(r.createdAt)}</span>
+                <span className="text-xs text-white/30 shrink-0">{formatTime(r.completedAt)}</span>
               </div>
             ))
           )
@@ -318,8 +318,10 @@ const ClassicChatsPage = () => {
 
             if (isSystem) {
               return (
-                <div key={m.id} className="flex justify-center my-2">
-                  <span className="bg-white/5 rounded-full px-3 py-1 text-xs text-white/50">{m.content}</span>
+                <div key={m.id} className="flex justify-center my-3">
+                  <div className="bg-white/5 border border-white/10 rounded-xl px-4 py-3 max-w-[90%]">
+                    <p className="text-xs text-white/60 whitespace-pre-wrap leading-relaxed">{m.content}</p>
+                  </div>
                 </div>
               );
             }

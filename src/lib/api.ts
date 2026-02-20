@@ -556,30 +556,47 @@ export interface ClassicTournamentDetailResponse {
 }
 
 export interface ClassicRegistrationResponse {
-  registration: {
-    id: string;
-    tournamentId: string;
-    userId: string;
-    pubgIds: string[];
-  };
+  registered: boolean;
+  registrationId: string;
 }
 
 export interface ClassicMyActiveItem {
+  registrationId: string;
   id: string;
-  tournamentId: string;
+  title: string | null;
+  description: string | null;
+  map: string;
+  mapImage: string | null;
+  mode: string;
+  server: string;
+  startTime: string;
+  entryFee: number;
+  prizePool: number;
+  maxParticipants: number;
+  registeredPlayers: number;
+  winnerCount: number;
+  prize1: number;
+  prize2: number;
+  prize3: number;
+  status: string;
   pubgIds: string[];
-  createdAt: string;
-  tournament: ClassicTournamentListItem;
 }
 
 export interface ClassicMyHistoryItem {
+  registrationId: string;
   id: string;
-  tournamentId: string;
-  pubgIds: string[];
+  title: string | null;
+  map: string;
+  mapImage: string | null;
+  mode: string;
+  server: string;
+  entryFee: number;
+  prizePool: number;
+  status: string;
+  completedAt: string | null;
   place: number | null;
   prizeAmount: number;
-  createdAt: string;
-  tournament: ClassicTournamentListItem;
+  result: 'win' | 'loss' | 'cancelled';
 }
 
 export interface ClassicChatListItem {
@@ -623,10 +640,10 @@ export const classicApi = {
     apiFetch<ClassicRegistrationResponse>(`/api/classic/${id}/register`, { method: 'POST', body: { pubgIds } }),
 
   myActive: () =>
-    apiFetch<{ registrations: ClassicMyActiveItem[] }>('/api/classic/my/active'),
+    apiFetch<{ tournaments: ClassicMyActiveItem[] }>('/api/classic/my/active'),
 
   myHistory: () =>
-    apiFetch<{ registrations: ClassicMyHistoryItem[] }>('/api/classic/my/history'),
+    apiFetch<{ tournaments: ClassicMyHistoryItem[] }>('/api/classic/my/history'),
 
   myChats: () =>
     apiFetch<{ chats: ClassicChatListItem[] }>('/api/classic/my/chats'),

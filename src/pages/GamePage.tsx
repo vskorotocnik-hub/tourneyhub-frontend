@@ -91,6 +91,7 @@ const GamePage = () => {
   const [classicLoading, setClassicLoading] = useState(false);
   const [classicRegError, setClassicRegError] = useState('');
   const [classicRegLoading, setClassicRegLoading] = useState(false);
+  const [myClassicTournamentIds, setMyClassicTournamentIds] = useState<Set<string>>(new Set());
   
   // Update current time every second for countdown
   useEffect(() => {
@@ -252,11 +253,17 @@ const GamePage = () => {
   const loadClassicTournaments = useCallback(() => {
     if (activeMode !== 'classic') return;
     setClassicLoading(true);
-    classicApi.list()
-      .then(res => setClassicTournaments(res.tournaments))
+    Promise.all([
+      classicApi.list(),
+      isAuthenticated ? classicApi.myActive().catch(() => ({ tournaments: [] })) : Promise.resolve({ tournaments: [] }),
+    ])
+      .then(([listRes, activeRes]) => {
+        setClassicTournaments(listRes.tournaments);
+        setMyClassicTournamentIds(new Set(activeRes.tournaments.map((t: { id: string }) => t.id)));
+      })
       .catch(() => {})
       .finally(() => setClassicLoading(false));
-  }, [activeMode]);
+  }, [activeMode, isAuthenticated]);
 
   useEffect(() => {
     loadClassicTournaments();
@@ -1944,20 +1951,30 @@ const GamePage = () => {
                         📌 После регистрации откроется чат с информацией о турнире.
                       </p>
                       
-                      {/* Join Button */}
-                      <button
-                        onClick={() => {
-                          if (!isAuthenticated) { setShowAuthModal(true); return; }
-                          setSelectedClassicTournament(tournament);
-                          setClassicPlayerIds(tournament.mode === 'SOLO' ? [''] : tournament.mode === 'DUO' ? ['', ''] : ['', '', '', '']);
-                          setClassicRegError('');
-                          setShowClassicRegistration(true);
-                        }}
-                        className="w-full py-2.5 rounded-lg bg-purple-600 
-                                 text-white text-sm font-bold hover:opacity-90 transition-opacity"
-                      >
-                        🎮 Зарегистрироваться
-                      </button>
+                      {/* Join Button / Already Registered */}
+                      {myClassicTournamentIds.has(tournament.id) ? (
+                        <button
+                          onClick={() => navigate('/classic-chats')}
+                          className="w-full py-2.5 rounded-lg bg-emerald-600/20 border border-emerald-500/30
+                                   text-emerald-400 text-sm font-bold hover:bg-emerald-600/30 transition-colors"
+                        >
+                          ✅ Вы зарегистрированы · Открыть чат
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => {
+                            if (!isAuthenticated) { setShowAuthModal(true); return; }
+                            setSelectedClassicTournament(tournament);
+                            setClassicPlayerIds(tournament.mode === 'SOLO' ? [''] : tournament.mode === 'DUO' ? ['', ''] : ['', '', '', '']);
+                            setClassicRegError('');
+                            setShowClassicRegistration(true);
+                          }}
+                          className="w-full py-2.5 rounded-lg bg-purple-600 
+                                   text-white text-sm font-bold hover:opacity-90 transition-opacity"
+                        >
+                          🎮 Зарегистрироваться
+                        </button>
+                      )}
                     </div>
                   </div>
                 );
@@ -2765,19 +2782,29 @@ const GamePage = () => {
                           </div>
                         </div>
                         
-                        {/* Register Button */}
-                        <button
-                          onClick={() => {
-                            if (!isAuthenticated) { setShowAuthModal(true); return; }
-                            setSelectedClassicTournament(tournament);
-                            setClassicPlayerIds(tournament.mode === 'SOLO' ? [''] : tournament.mode === 'DUO' ? ['', ''] : ['', '', '', '']);
-                            setClassicRegError('');
-                            setShowClassicRegistration(true);
-                          }}
-                          className="w-full py-2.5 rounded-xl bg-purple-600 text-white text-sm font-bold hover:opacity-90 transition-opacity"
-                        >
-                          🎮 Регистрация
-                        </button>
+                        {/* Register Button / Already Registered */}
+                        {myClassicTournamentIds.has(tournament.id) ? (
+                          <button
+                            onClick={() => navigate('/classic-chats')}
+                            className="w-full py-2.5 rounded-xl bg-emerald-600/20 border border-emerald-500/30
+                                     text-emerald-400 text-sm font-bold hover:bg-emerald-600/30 transition-colors"
+                          >
+                            ✅ Зарегистрирован · Чат
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => {
+                              if (!isAuthenticated) { setShowAuthModal(true); return; }
+                              setSelectedClassicTournament(tournament);
+                              setClassicPlayerIds(tournament.mode === 'SOLO' ? [''] : tournament.mode === 'DUO' ? ['', ''] : ['', '', '', '']);
+                              setClassicRegError('');
+                              setShowClassicRegistration(true);
+                            }}
+                            className="w-full py-2.5 rounded-xl bg-purple-600 text-white text-sm font-bold hover:opacity-90 transition-opacity"
+                          >
+                            🎮 Регистрация
+                          </button>
+                        )}
                       </div>
                     </div>
                   );
@@ -2840,21 +2867,29 @@ const GamePage = () => {
             )}
 
             <div className="space-y-3 mb-4">
-              <p className="text-xs text-white/60">🆔 ID игроков (PUBG)</p>
+              <p className="text-xs text-white/60">🆔 PUBG Mobile ID (ровно 10 цифр)</p>
               {classicPlayerIds.map((id, index) => (
-                <input
-                  key={index}
-                  type="text"
-                  value={id}
-                  onChange={(e) => {
-                    const newIds = [...classicPlayerIds];
-                    newIds[index] = e.target.value;
-                    setClassicPlayerIds(newIds);
-                  }}
-                  placeholder={index === 0 ? 'Твой игровой ID' : `ID тиммейта ${index}`}
-                  className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2.5
-                           text-sm text-white placeholder-white/30 outline-none focus:border-purple-500/50"
-                />
+                <div key={index}>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    maxLength={10}
+                    value={id}
+                    onChange={(e) => {
+                      const val = e.target.value.replace(/\D/g, '').slice(0, 10);
+                      const newIds = [...classicPlayerIds];
+                      newIds[index] = val;
+                      setClassicPlayerIds(newIds);
+                    }}
+                    placeholder={index === 0 ? 'Твой PUBG ID (10 цифр)' : `ID тиммейта ${index} (10 цифр)`}
+                    className={`w-full bg-white/5 border rounded-lg px-3 py-2.5
+                             text-sm text-white placeholder-white/30 outline-none focus:border-purple-500/50
+                             ${id.length > 0 && id.length !== 10 ? 'border-red-500/50' : 'border-white/10'}`}
+                  />
+                  {id.length > 0 && id.length !== 10 && (
+                    <p className="text-[10px] text-red-400 mt-0.5">{id.length}/10 цифр</p>
+                  )}
+                </div>
               ))}
             </div>
             <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-3 mb-4">
@@ -2869,17 +2904,22 @@ const GamePage = () => {
                 disabled={classicRegLoading}
                 onClick={async () => {
                   const requiredIds = selectedClassicTournament.mode === 'SOLO' ? 1 : selectedClassicTournament.mode === 'DUO' ? 2 : 4;
-                  const filledIds = classicPlayerIds.slice(0, requiredIds).filter(id => id.trim());
-                  if (filledIds.length < requiredIds) {
-                    setClassicRegError(`Заполните все ${requiredIds} ID!`);
-                    return;
+                  const filledIds = classicPlayerIds.slice(0, requiredIds);
+                  // Validate all IDs are exactly 10 digits
+                  for (let i = 0; i < requiredIds; i++) {
+                    if (!/^\d{10}$/.test(filledIds[i] || '')) {
+                      setClassicRegError(`ID ${i === 0 ? 'игрока' : `тиммейта ${i}`} должен быть ровно 10 цифр`);
+                      return;
+                    }
                   }
                   setClassicRegLoading(true);
                   setClassicRegError('');
                   try {
-                    await classicApi.register(selectedClassicTournament.id, filledIds);
+                    const result = await classicApi.register(selectedClassicTournament.id, filledIds);
                     setShowClassicRegistration(false);
                     loadClassicTournaments();
+                    // Navigate to classic chats page after successful registration
+                    navigate(`/classic-chats/${result.registrationId}`);
                   } catch (e: any) {
                     setClassicRegError(e?.message || 'Ошибка регистрации');
                   }
