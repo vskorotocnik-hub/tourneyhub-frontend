@@ -95,6 +95,7 @@ export interface ClassicMyHistoryItem {
 
 export interface ClassicChatListItem {
   registrationId: string;
+  createdAt: string;
   tournament: { id: string; title: string | null; map: string; mode: string; status: string };
   messageCount: number;
   unreadCount: number;

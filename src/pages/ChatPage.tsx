@@ -23,7 +23,7 @@ function classicToChat(c: ClassicChatListItem): Chat {
     title: `🏆 ${c.tournament.title || c.tournament.map}`,
     subtitle: `${ml[c.tournament.mode]||c.tournament.mode} • ${sl[c.tournament.status]||c.tournament.status}`,
     lastMessage: c.lastMessage?.content || 'Чат турнира',
-    lastMessageTime: c.lastMessage ? new Date(c.lastMessage.createdAt) : undefined,
+    lastMessageTime: new Date(c.lastMessage?.createdAt || c.createdAt),
     unreadCount: c.unreadCount || 0,
     tournamentStatus: c.tournament.status,
     isResultSubmitted: c.tournament.status === 'COMPLETED' || c.tournament.status === 'CANCELLED',

@@ -206,19 +206,35 @@ export default function ClassicTournamentsPage() {
             </div>
           </div>
           <div className="lg:col-span-2 space-y-4">
-            {/* PUBG IDs Quick Copy */}
+            {/* PUBG IDs — grouped by player */}
             {detail.registrations.length > 0 && (
               <div className="bg-yellow-500/5 rounded-lg border border-yellow-500/20 p-4">
-                <div className="flex items-center justify-between mb-2">
-                  <h3 className="text-sm font-semibold text-yellow-400">📋 PUBG ID</h3>
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-sm font-semibold text-yellow-400">📋 PUBG ID участников</h3>
                   <button onClick={() => { navigator.clipboard.writeText(detail.registrations.flatMap(r => r.pubgIds).join('\n')); alert('Скопировано!'); }}
                     className="px-3 py-1 rounded-lg bg-yellow-600/20 text-yellow-400 text-xs hover:bg-yellow-600/30">Копировать все</button>
                 </div>
-                <div className="flex flex-wrap gap-1.5">
-                  {detail.registrations.map(r => r.pubgIds.map(pid => (
-                    <button key={`${r.id}-${pid}`} onClick={() => navigator.clipboard.writeText(pid)}
-                      className="px-2 py-0.5 bg-zinc-800 rounded border border-zinc-700 text-xs text-white font-mono hover:bg-zinc-700" title="Копировать">{pid}</button>
-                  )))}
+                <div className="space-y-2">
+                  {detail.registrations.map((r, i) => (
+                    <div key={r.id} className="bg-zinc-800/60 rounded-lg p-2.5 border border-zinc-700/40">
+                      <div className="flex items-center gap-2 mb-1.5">
+                        <span className="w-5 h-5 rounded-full bg-blue-500/80 flex items-center justify-center text-[10px] font-bold text-white shrink-0">{i + 1}</span>
+                        <span className="text-xs font-medium text-white truncate">{r.user.username}</span>
+                        {r.pubgIds.length > 1 && <span className="text-[10px] text-zinc-500">({r.pubgIds.length} ID — команда)</span>}
+                      </div>
+                      <div className="flex flex-wrap gap-1.5 pl-7">
+                        {r.pubgIds.map((pid, j) => (
+                          <button key={`${r.id}-${pid}`} onClick={() => { navigator.clipboard.writeText(pid); }}
+                            className="group relative px-2.5 py-1 bg-zinc-900 rounded border border-zinc-600 text-xs text-white font-mono hover:bg-zinc-700 hover:border-yellow-500/50 transition-all"
+                            title={`Копировать ${pid}`}>
+                            {r.pubgIds.length > 1 && <span className="text-[10px] text-zinc-500 mr-1.5">#{j + 1}</span>}
+                            {pid}
+                            <span className="ml-1.5 text-zinc-500 group-hover:text-yellow-400 transition-colors">📋</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
             )}
@@ -249,16 +265,28 @@ export default function ClassicTournamentsPage() {
               {detail.registrations.length === 0 ? (
                 <p className="text-zinc-500 text-xs text-center py-4">Нет регистраций</p>
               ) : detail.registrations.map((r, i) => (
-                <div key={r.id} className="flex items-center gap-3 bg-zinc-700/30 rounded-lg p-3 border border-zinc-700/30">
-                  <div className="w-8 h-8 rounded-full bg-blue-500 flex items-center justify-center text-xs font-bold text-white shrink-0">{i + 1}</div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm text-white font-medium truncate">{r.user.username}</p>
-                    <p className="text-[10px] text-zinc-500">PUBG: {r.pubgIds.join(', ')}</p>
-                    {r.place && <p className="text-[10px] text-emerald-400 font-bold mt-0.5">Место: {r.place} — Приз: {r.prizeAmount} UC</p>}
+                <div key={r.id} className="bg-zinc-700/30 rounded-lg p-3 border border-zinc-700/30">
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-full bg-blue-500 flex items-center justify-center text-xs font-bold text-white shrink-0">{i + 1}</div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm text-white font-medium truncate">{r.user.username}</p>
+                      {r.place && <p className="text-[10px] text-emerald-400 font-bold mt-0.5">Место: {r.place} — Приз: {r.prizeAmount} UC</p>}
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <span className="text-[10px] text-zinc-600">{r._count.messages} сообщ.</span>
+                      <button onClick={() => setChatReg(r)} className="px-2.5 py-1 rounded-lg bg-zinc-700 text-zinc-300 text-[10px] hover:bg-zinc-600">Чат</button>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    <span className="text-[10px] text-zinc-600">{r._count.messages} сообщ.</span>
-                    <button onClick={() => setChatReg(r)} className="px-2.5 py-1 rounded-lg bg-zinc-700 text-zinc-300 text-[10px] hover:bg-zinc-600">Чат</button>
+                  <div className="flex flex-wrap gap-1.5 mt-2 pl-11">
+                    {r.pubgIds.map((pid, j) => (
+                      <button key={`${r.id}-${pid}`} onClick={() => navigator.clipboard.writeText(pid)}
+                        className="group px-2 py-0.5 bg-zinc-800 rounded border border-zinc-600 text-[11px] text-white font-mono hover:bg-zinc-700 hover:border-yellow-500/50 transition-all"
+                        title={`Копировать ${pid}`}>
+                        {r.pubgIds.length > 1 && <span className="text-[10px] text-zinc-500 mr-1">#{j + 1}</span>}
+                        {pid}
+                        <span className="ml-1 text-zinc-500 group-hover:text-yellow-400">📋</span>
+                      </button>
+                    ))}
                   </div>
                 </div>
               ))}

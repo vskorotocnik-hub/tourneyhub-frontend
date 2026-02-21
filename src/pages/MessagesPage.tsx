@@ -19,7 +19,7 @@ function classicChatToChat(c: ClassicChatListItem): Chat {
     title: `🏆 ${c.tournament.title || c.tournament.map}`,
     subtitle: `${classicModeLabels[c.tournament.mode] || c.tournament.mode} • ${classicStatusLabels[c.tournament.status] || c.tournament.status}`,
     lastMessage: c.lastMessage?.content || 'Чат турнира',
-    lastMessageTime: c.lastMessage ? new Date(c.lastMessage.createdAt) : undefined,
+    lastMessageTime: new Date(c.lastMessage?.createdAt || c.createdAt),
     unreadCount: c.unreadCount || 0,
     tournamentStatus: c.tournament.status,
     isResultSubmitted: c.tournament.status === 'COMPLETED' || c.tournament.status === 'CANCELLED',
@@ -123,7 +123,10 @@ const MessagesPage = () => {
     }).catch(() => {});
   }, [user]);
 
-  const allChats = [supportChat, ...filteredTournamentChats];
+  const sortedTournamentChats = [...filteredTournamentChats].sort((a, b) =>
+    (b.lastMessageTime?.getTime() || 0) - (a.lastMessageTime?.getTime() || 0)
+  );
+  const allChats = [supportChat, ...sortedTournamentChats];
   const totalUnread = allTournamentChats.reduce((sum, c) => sum + (c.unreadCount || 0), 0);
 
   const formatTime = (date?: Date) => {

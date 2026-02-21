@@ -235,6 +235,7 @@ router.get('/my/chats', async (req: Request, res: Response) => {
 
       return {
         registrationId: r.id,
+        createdAt: r.createdAt,
         tournament: {
           id: r.tournament.id,
           title: r.tournament.title,
