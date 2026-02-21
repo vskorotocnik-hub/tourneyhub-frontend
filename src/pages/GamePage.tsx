@@ -1,12 +1,18 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import type { GameMode, TeamMode, ServerRegion } from '../types';
-import { tournamentLeaders, serverNames, classicLeaders } from '../data/tournaments';
+import { tournamentLeaders, serverNames } from '../data/tournaments';
 import { wowLeaders } from '../data/wow';
 import { tournamentApi, wowApi, classicApi, type TournamentListItem, type ActiveTournamentData, type WoWMapItem, type WoWTournamentListItem, type ClassicTournamentListItem } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
 import { getSocket } from '../lib/socket';
 import AuthPromptModal from '../components/AuthPromptModal';
+import RulesModal from '../components/RulesModal';
+import ClassicSection from '../components/ClassicSection';
+import ClassicRegistrationModal from '../components/ClassicRegistrationModal';
+import SearchingView from '../components/SearchingView';
+import WoWCreateSection from '../components/WoWCreateSection';
+import TDMCreateSection from '../components/TDMCreateSection';
 
 type ViewState = 'create' | 'searching' | 'found';
 type ActionTab = 'create' | 'join';
@@ -89,8 +95,6 @@ const GamePage = () => {
   const [currentTime, setCurrentTime] = useState(() => Date.now());
   const [classicTournaments, setClassicTournaments] = useState<ClassicTournamentListItem[]>([]);
   const [classicLoading, setClassicLoading] = useState(false);
-  const [classicRegError, setClassicRegError] = useState('');
-  const [classicRegLoading, setClassicRegLoading] = useState(false);
   const [myClassicTournamentIds, setMyClassicTournamentIds] = useState<Set<string>>(new Set());
   
   // Update current time every second for countdown
@@ -100,7 +104,6 @@ const GamePage = () => {
     }, 1000);
     return () => clearInterval(timer);
   }, []);
-  const [classicPlayerIds, setClassicPlayerIds] = useState<string[]>(['']);
   
   // Active tournament type tracking (for search/found view)
   const [activeGameType, setActiveGameType] = useState<'TDM' | 'WOW'>('TDM');
@@ -468,448 +471,29 @@ const GamePage = () => {
     { id: 'classic', label: 'Классика', icon: '🏆' },
   ];
 
-  const servers: { id: ServerRegion; label: string }[] = [
-    { id: 'europe', label: '🇪🇺 Европа' },
-    { id: 'na', label: '🇺🇸 С. Америка' },
-    { id: 'asia', label: '🇯🇵 Азия' },
-    { id: 'me', label: '🇦🇪 Бл. Восток' },
-    { id: 'sa', label: '🇧🇷 Ю. Америка' },
-  ];
-
   // ============= SEARCHING VIEW =============
   if (viewState === 'searching') {
     return (
-      <div className="min-h-screen pb-32">
-        {/* ── Mobile version ── */}
-        <div className="md:hidden">
-          <main className="px-4 pt-4 pb-4">
-            {/* Top bar */}
-            <div className="flex items-center justify-between mb-6">
-              <button onClick={handleGoBack} className="flex items-center gap-1.5 text-white/50 hover:text-white transition-colors">
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" /></svg>
-                <span className="text-xs">Назад</span>
-              </button>
-              <span className="text-xs text-white/50 bg-white/5 px-3 py-1.5 rounded-full border border-white/10">
-                {activeGameType === 'WOW' ? `WoW • ${activeWoWMapInfo?.format || ''} • ${activeWoWMapInfo?.name || ''}` : `TDM • ${teamMode === 'solo' ? '1v1' : '2v2'}`} • {server === 'europe' ? 'EU' : server.toUpperCase()}
-              </span>
-              <span className="text-sm font-mono font-bold text-white/80">{formatTime(searchTime)}</span>
-            </div>
-
-            {/* VS Arena — dynamic: shows N-1 opponent slots */}
-            <div className="relative py-8 mb-6">
-              {/* Pulse ring background */}
-              <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                <div className="w-48 h-48 rounded-full border border-red-500/20 animate-ping" style={{ animationDuration: '3s' }} />
-                <div className="absolute w-36 h-36 rounded-full border border-red-500/10 animate-ping" style={{ animationDuration: '2s' }} />
-              </div>
-
-              <div className="relative z-10 flex items-center justify-center gap-4 flex-wrap">
-                {/* Your avatar */}
-                <div className="flex flex-col items-center gap-2">
-                  <div className="w-16 h-16 rounded-full border-2 border-emerald-500 overflow-hidden bg-emerald-500/20 flex items-center justify-center shadow-lg shadow-emerald-500/20">
-                    {user?.avatar ? (
-                      <img src={user.avatar} alt="" className="w-full h-full object-cover" />
-                    ) : (
-                      <span className="text-2xl">👤</span>
-                    )}
-                  </div>
-                  <span className="text-[10px] text-white font-medium truncate max-w-[70px]">{user?.username || 'Ты'}</span>
-                  <span className="text-[9px] text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full">Готов</span>
-                </div>
-
-                {/* VS badge */}
-                <div className="flex flex-col items-center">
-                  <div className="w-10 h-10 rounded-full bg-gradient-to-br from-red-600 to-orange-600 flex items-center justify-center shadow-lg shadow-red-500/30">
-                    <span className="text-white font-black text-xs">VS</span>
-                  </div>
-                  <span className="text-sm font-bold text-yellow-400 mt-1">{bet} UC</span>
-                </div>
-
-                {/* Opponent slots — one per opponent team needed */}
-                {Array.from({ length: activeTeamCount - 1 }).map((_, i) => {
-                  const opponent = allOpponents[i];
-                  return (
-                    <div key={i} className="flex flex-col items-center gap-2">
-                      {opponent ? (
-                        <>
-                          <div className="w-16 h-16 rounded-full border-2 border-red-500 overflow-hidden bg-red-500/20 flex items-center justify-center shadow-lg shadow-red-500/20">
-                            <img src={opponent.avatar} alt={opponent.username} className="w-full h-full object-cover" />
-                          </div>
-                          <span className="text-[10px] text-white font-medium truncate max-w-[70px]">{opponent.username}</span>
-                          <span className="text-[9px] text-red-400 bg-red-500/10 px-2 py-0.5 rounded-full">Команда {i + 2}</span>
-                        </>
-                      ) : (
-                        <>
-                          <div className="w-16 h-16 rounded-full border-2 border-dashed border-white/20 bg-white/5 flex items-center justify-center">
-                            <div className="flex gap-1">
-                              <div className="w-1.5 h-1.5 bg-white/40 rounded-full animate-bounce" style={{ animationDelay: `${i * 100}ms` }} />
-                              <div className="w-1.5 h-1.5 bg-white/40 rounded-full animate-bounce" style={{ animationDelay: `${i * 100 + 150}ms` }} />
-                              <div className="w-1.5 h-1.5 bg-white/40 rounded-full animate-bounce" style={{ animationDelay: `${i * 100 + 300}ms` }} />
-                            </div>
-                          </div>
-                          <span className="text-[10px] text-white/40">Поиск...</span>
-                          <span className="text-[9px] text-white/20 bg-white/5 px-2 py-0.5 rounded-full">Команда {i + 2}</span>
-                        </>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* Prize distribution */}
-            {activeGameType === 'WOW' && activeWoWMapInfo && (
-              <div className="bg-dark-200/60 rounded-xl border border-white/10 p-3 mb-4">
-                <div className="flex gap-3">
-                  <img src={activeWoWMapInfo.image} alt={activeWoWMapInfo.name} className="w-16 h-12 rounded-lg object-cover" />
-                  <div>
-                    <p className="text-sm font-semibold text-white">{activeWoWMapInfo.name}</p>
-                    <div className="flex gap-1.5 mt-1">
-                      <span className="text-[10px] bg-red-600/30 text-red-400 px-1.5 py-0.5 rounded">{activeWoWMapInfo.format}</span>
-                      <span className="text-[10px] bg-white/10 text-white/60 px-1.5 py-0.5 rounded">{activeWoWMapInfo.rounds}R</span>
-                      <span className="text-[10px] bg-white/10 text-white/60 px-1.5 py-0.5 rounded">{activeTeamCount} команд</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            <div className="bg-gradient-to-r from-yellow-600/10 to-orange-600/10 rounded-2xl border border-yellow-500/20 p-4 mb-4">
-              <div className="flex items-center justify-between mb-3">
-                <p className="text-xs text-white/60">💰 Призы по местам</p>
-                <span className="text-[10px] text-white/40">Пул {bet * activeTeamCount} UC • 10% комиссия</span>
-              </div>
-              <div className={`grid gap-1.5 ${activeTeamCount === 2 ? 'grid-cols-2' : activeTeamCount === 3 ? 'grid-cols-3' : 'grid-cols-4'}`}>
-                {prizes.map((p) => (
-                  <div key={p.place} className={`text-center py-2 rounded-xl ${p.place === 1 ? 'bg-yellow-500/20 border border-yellow-500/30' : 'bg-white/5'}`}>
-                    <p className="text-[10px] text-white/40 mb-0.5">{p.place} место</p>
-                    <p className={`text-sm font-bold ${p.place === 1 ? 'text-yellow-400' : p.place === teamCount ? 'text-red-400' : 'text-white/70'}`}>
-                      {p.amount} UC
-                    </p>
-                    <p className="text-[9px] text-white/30">{p.pct}%</p>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Status steps */}
-            <div className="space-y-3 mb-4">
-              <div className="flex items-center gap-3 bg-emerald-500/10 border border-emerald-500/20 rounded-xl px-4 py-3">
-                <div className="w-6 h-6 rounded-full bg-emerald-500 flex items-center justify-center shrink-0">
-                  <svg className="w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
-                </div>
-                <span className="text-sm text-white">Турнир создан, ставка списана</span>
-              </div>
-
-              {/* Team join progress for 3-4 teams */}
-              {activeTeamCount > 2 && !foundOpponent && (
-                <div className="flex items-center gap-3 bg-blue-500/10 border border-blue-500/20 rounded-xl px-4 py-3">
-                  <div className="w-6 h-6 rounded-full bg-blue-500 flex items-center justify-center shrink-0">
-                    <span className="text-xs font-bold text-white">{teamsJoinedCount}</span>
-                  </div>
-                  <div className="flex-1">
-                    <span className="text-sm text-white">Команд собралось: {teamsJoinedCount}/{activeTeamCount}</span>
-                    <div className="w-full h-1.5 bg-white/10 rounded-full mt-1.5 overflow-hidden">
-                      <div className="h-full bg-blue-500 rounded-full transition-all" style={{ width: `${(teamsJoinedCount / activeTeamCount) * 100}%` }} />
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {foundOpponent ? (
-                <div className="flex items-center gap-3 bg-emerald-500/10 border border-emerald-500/20 rounded-xl px-4 py-3">
-                  <div className="w-6 h-6 rounded-full bg-emerald-500 flex items-center justify-center shrink-0">
-                    <svg className="w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
-                  </div>
-                  <span className="text-sm text-white">
-                    {allOpponents.length > 1 ? `${allOpponents.length} соперника найдено!` : 'Соперник найден!'}
-                  </span>
-                </div>
-              ) : (
-                <div className="flex items-center gap-3 bg-yellow-500/10 border border-yellow-500/20 rounded-xl px-4 py-3">
-                  <div className="relative w-6 h-6 shrink-0">
-                    <div className="absolute inset-0 rounded-full bg-yellow-500/50 animate-ping" />
-                    <div className="relative w-6 h-6 rounded-full bg-yellow-500 flex items-center justify-center">
-                      <span className="text-xs">🔍</span>
-                    </div>
-                  </div>
-                  <span className="text-sm text-white">{teamCount > 2 ? 'Ждём остальные команды...' : 'Ищем достойного соперника...'}</span>
-                </div>
-              )}
-              <button
-                onClick={() => foundOpponent && activeTournamentId && navigate(`/messages/t-${activeTournamentId}`)}
-                className={`flex items-center gap-3 rounded-xl px-4 py-3 w-full text-left transition-all ${
-                  foundOpponent
-                    ? 'bg-purple-500/20 border-2 border-purple-500/50 animate-pulse'
-                    : 'bg-white/5 border border-white/10 opacity-40'
-                }`}
-              >
-                <div className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 ${
-                  foundOpponent ? 'bg-purple-500' : 'bg-white/10'
-                }`}>
-                  <span className="text-xs">💬</span>
-                </div>
-                <span className="text-sm text-white font-medium">Чат матча и игра</span>
-                {foundOpponent && <span className="ml-auto text-xs text-purple-300">Перейти →</span>}
-              </button>
-            </div>
-
-            {/* Found message */}
-            {foundOpponent && (
-              <div className="bg-gradient-to-r from-purple-600/20 to-pink-600/20 rounded-xl border border-purple-500/30 p-3 mb-4">
-                <p className="text-sm font-semibold text-white mb-1">
-                  🎮 {allOpponents.length > 1 ? 'Все команды собрались!' : 'Соперник найден!'}
-                </p>
-                {allOpponents.length > 1 && (
-                  <div className="flex flex-wrap gap-2 mb-2">
-                    {allOpponents.map((op, i) => (
-                      <div key={i} className="flex items-center gap-1.5 bg-white/5 rounded-lg px-2 py-1">
-                        <img src={op.avatar} alt="" className="w-5 h-5 rounded-full" />
-                        <span className="text-xs text-white/80">{op.username}</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-                <p className="text-xs text-white/70">Перейдите в <span className="text-purple-300 font-medium">Чат матча</span> — там вся информация для начала игры.</p>
-              </div>
-            )}
-          </main>
-
-          {/* Sticky Bottom Button */}
-          <div className="fixed bottom-16 left-0 right-0 p-4 bg-gradient-to-t from-dark-100 via-dark-100/95 to-transparent pt-8">
-            {foundOpponent ? (
-              <button
-                onClick={() => activeTournamentId && navigate(`/messages/t-${activeTournamentId}`)}
-                className="w-full py-3.5 rounded-xl text-sm font-semibold bg-gradient-to-r from-purple-600 to-pink-600 text-white hover:opacity-90 transition-all active:scale-[0.98]"
-              >
-                💬 Перейти в чат матча
-              </button>
-            ) : (
-              <button
-                onClick={handleCancelSearch}
-                disabled={!canCancel}
-                className="w-full py-3.5 rounded-xl text-sm font-semibold bg-red-500/15 border border-red-500/30 text-red-400 hover:bg-red-500/25 transition-all active:scale-[0.98]"
-              >
-                ❌ Отменить поиск
-              </button>
-            )}
-          </div>
-        </div>
-
-        {/* ── Desktop version ── */}
-        <div className="hidden md:block">
-          <main className="max-w-3xl mx-auto px-8 pt-8">
-            {/* Header */}
-            <div className="relative text-center mb-8">
-              <button onClick={handleGoBack} className="absolute left-0 top-1/2 -translate-y-1/2 flex items-center gap-1.5 text-white/50 hover:text-white transition-colors">
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" /></svg>
-                <span className="text-sm">Назад</span>
-              </button>
-              <h1 className="text-2xl font-bold text-white mb-1">{foundOpponent ? '✅ Соперники найдены!' : 'Поиск соперника'}</h1>
-              <p className="text-sm text-white/40">{activeGameType === 'WOW' ? `WoW • ${activeWoWMapInfo?.format || ''} • ${activeWoWMapInfo?.name || ''}` : `TDM • ${teamMode === 'solo' ? '1v1 Solo' : '2v2 Duo'}`} • {server === 'europe' ? 'Европа' : server} • {bet} UC</p>
-            </div>
-
-            {/* VS Arena — Desktop — dynamic: shows N-1 opponent slots */}
-            <div className="relative py-12 mb-8">
-              {/* Animated rings */}
-              <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                <div className="w-64 h-64 rounded-full border border-red-500/10 animate-ping" style={{ animationDuration: '4s' }} />
-                <div className="absolute w-48 h-48 rounded-full border border-red-500/15 animate-ping" style={{ animationDuration: '2.5s' }} />
-              </div>
-
-              <div className="relative z-10 flex items-center justify-center gap-10 flex-wrap">
-                {/* You */}
-                <div className="flex flex-col items-center gap-3">
-                  <div className="w-24 h-24 rounded-full border-3 border-emerald-500 overflow-hidden bg-emerald-500/20 flex items-center justify-center shadow-xl shadow-emerald-500/20">
-                    {user?.avatar ? (
-                      <img src={user.avatar} alt="" className="w-full h-full object-cover" />
-                    ) : (
-                      <span className="text-4xl">👤</span>
-                    )}
-                  </div>
-                  <div className="text-center">
-                    <p className="text-sm font-semibold text-white">{user?.username || 'Ты'}</p>
-                    <p className="text-xs text-emerald-400">Рейтинг: {user?.rating ?? 1000}</p>
-                  </div>
-                  <span className="text-xs text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-3 py-1 rounded-full">✓ Готов</span>
-                </div>
-
-                {/* VS */}
-                <div className="flex flex-col items-center gap-2">
-                  <div className="w-14 h-14 rounded-full bg-gradient-to-br from-red-600 to-orange-600 flex items-center justify-center shadow-xl shadow-red-500/30 ring-4 ring-red-500/20">
-                    <span className="text-white font-black text-base">VS</span>
-                  </div>
-                  <div className="text-center">
-                    <span className="text-lg font-bold text-yellow-400">{bet} UC</span>
-                    <p className="text-[10px] text-white/30 mt-0.5">ставка</p>
-                  </div>
-                </div>
-
-                {/* Opponent slots */}
-                {Array.from({ length: activeTeamCount - 1 }).map((_, i) => {
-                  const opponent = allOpponents[i];
-                  return (
-                    <div key={i} className="flex flex-col items-center gap-3">
-                      {opponent ? (
-                        <>
-                          <div className="w-24 h-24 rounded-full border-3 border-red-500 overflow-hidden bg-red-500/20 flex items-center justify-center shadow-xl shadow-red-500/20">
-                            <img src={opponent.avatar} alt={opponent.username} className="w-full h-full object-cover" />
-                          </div>
-                          <div className="text-center">
-                            <p className="text-sm font-semibold text-white">{opponent.username}</p>
-                            <p className="text-xs text-red-400">Команда {i + 2}</p>
-                          </div>
-                          <span className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 px-3 py-1 rounded-full">⚔️ Найден</span>
-                        </>
-                      ) : (
-                        <>
-                          <div className="w-24 h-24 rounded-full border-3 border-dashed border-white/20 bg-white/5 flex items-center justify-center">
-                            <div className="flex gap-1.5">
-                              <div className="w-2.5 h-2.5 bg-white/30 rounded-full animate-bounce" style={{ animationDelay: `${i * 100}ms` }} />
-                              <div className="w-2.5 h-2.5 bg-white/30 rounded-full animate-bounce" style={{ animationDelay: `${i * 100 + 200}ms` }} />
-                              <div className="w-2.5 h-2.5 bg-white/30 rounded-full animate-bounce" style={{ animationDelay: `${i * 100 + 400}ms` }} />
-                            </div>
-                          </div>
-                          <div className="text-center">
-                            <p className="text-sm font-semibold text-white/40">Поиск...</p>
-                            <p className="text-xs text-white/20">Команда {i + 2}</p>
-                          </div>
-                          <span className="text-xs text-white/20 bg-white/5 border border-white/10 px-3 py-1 rounded-full">⏳ Ожидание</span>
-                        </>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* WoW Map Info */}
-            {activeGameType === 'WOW' && activeWoWMapInfo && (
-              <div className="bg-dark-200/60 rounded-xl border border-white/10 p-4 mb-4 flex gap-4 items-center">
-                <img src={activeWoWMapInfo.image} alt={activeWoWMapInfo.name} className="w-20 h-14 rounded-lg object-cover" />
-                <div>
-                  <p className="text-sm font-semibold text-white">{activeWoWMapInfo.name}</p>
-                  <div className="flex gap-2 mt-1">
-                    <span className="text-xs bg-red-600/30 text-red-400 px-2 py-0.5 rounded">{activeWoWMapInfo.format}</span>
-                    <span className="text-xs bg-white/10 text-white/60 px-2 py-0.5 rounded">{activeWoWMapInfo.rounds}R</span>
-                    <span className="text-xs bg-white/10 text-white/60 px-2 py-0.5 rounded">{activeTeamCount} команд</span>
-                    <span className="text-xs bg-white/10 text-white/60 px-2 py-0.5 rounded">{activeWoWMapInfo.playersPerTeam} игр./ком.</span>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Timer + Prize distribution row */}
-            <div className="grid grid-cols-2 gap-4 mb-6">
-              <div className="bg-dark-200/60 rounded-2xl border border-white/10 p-5 text-center">
-                <p className="text-xs text-white/40 mb-2">Время поиска</p>
-                <p className="text-3xl font-mono font-bold text-white">{formatTime(searchTime)}</p>
-              </div>
-              <div className="bg-gradient-to-br from-yellow-600/15 to-orange-600/15 rounded-2xl border border-yellow-500/20 p-4">
-                <div className="flex items-center justify-between mb-2">
-                  <p className="text-xs text-white/60">💰 Призы по местам</p>
-                  <span className="text-[10px] text-white/40">Пул {bet * activeTeamCount} UC</span>
-                </div>
-                <div className={`grid gap-1 ${activeTeamCount === 2 ? 'grid-cols-2' : activeTeamCount === 3 ? 'grid-cols-3' : 'grid-cols-4'}`}>
-                  {prizes.map((p) => (
-                    <div key={p.place} className={`text-center py-1.5 rounded-lg ${p.place === 1 ? 'bg-yellow-500/20' : 'bg-white/5'}`}>
-                      <p className="text-[10px] text-white/40">{p.place} место</p>
-                      <p className={`text-sm font-bold ${p.place === 1 ? 'text-yellow-400' : p.place === teamCount ? 'text-red-400' : 'text-white/70'}`}>
-                        {p.amount} UC
-                      </p>
-                      <p className="text-[9px] text-white/30">{p.pct}%</p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-
-            {/* Steps */}
-            <div className="flex gap-3 mb-6">
-              <div className="flex-1 flex items-center gap-2.5 bg-emerald-500/10 border border-emerald-500/20 rounded-xl px-4 py-3">
-                <div className="w-5 h-5 rounded-full bg-emerald-500 flex items-center justify-center shrink-0">
-                  <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
-                </div>
-                <span className="text-xs text-white">Ставка списана</span>
-              </div>
-              {foundOpponent ? (
-                <div className="flex-1 flex items-center gap-2.5 bg-emerald-500/10 border border-emerald-500/20 rounded-xl px-4 py-3">
-                  <div className="w-5 h-5 rounded-full bg-emerald-500 flex items-center justify-center shrink-0">
-                    <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
-                  </div>
-                  <span className="text-xs text-white">{allOpponents.length > 1 ? `${allOpponents.length} соперника` : 'Соперник найден'}</span>
-                </div>
-              ) : (
-                <div className="flex-1 flex items-center gap-2.5 bg-yellow-500/10 border border-yellow-500/20 rounded-xl px-4 py-3">
-                  <div className="relative w-5 h-5 shrink-0">
-                    <div className="absolute inset-0 rounded-full bg-yellow-500/40 animate-ping" />
-                    <div className="relative w-5 h-5 rounded-full bg-yellow-500 flex items-center justify-center">
-                      <span className="text-[10px]">🔍</span>
-                    </div>
-                  </div>
-                  <span className="text-xs text-white">{activeTeamCount > 2 ? `Команд: ${teamsJoinedCount}/${activeTeamCount}` : 'Ищем соперника'}</span>
-                </div>
-              )}
-              <button
-                onClick={() => foundOpponent && activeTournamentId && navigate(`/messages/t-${activeTournamentId}`)}
-                className={`flex-1 flex items-center gap-2.5 rounded-xl px-4 py-3 transition-all ${
-                  foundOpponent
-                    ? 'bg-purple-500/20 border-2 border-purple-500/50 animate-pulse cursor-pointer'
-                    : 'bg-white/5 border border-white/10 opacity-40 cursor-default'
-                }`}
-              >
-                <div className={`w-5 h-5 rounded-full flex items-center justify-center shrink-0 ${
-                  foundOpponent ? 'bg-purple-500' : 'bg-white/10'
-                }`}>
-                  <span className="text-[10px]">💬</span>
-                </div>
-                <span className="text-xs text-white">Чат и игра</span>
-                {foundOpponent && <span className="ml-auto text-[10px] text-purple-300">→</span>}
-              </button>
-            </div>
-
-            {/* Found message — desktop */}
-            {foundOpponent && (
-              <div className="bg-gradient-to-r from-purple-600/20 to-pink-600/20 rounded-xl border border-purple-500/30 p-4 mb-6 text-center">
-                <p className="text-sm font-semibold text-white mb-1">
-                  🎮 {allOpponents.length > 1 ? 'Все команды собрались!' : 'Соперник найден!'}
-                </p>
-                {allOpponents.length > 1 && (
-                  <div className="flex flex-wrap justify-center gap-2 mb-2">
-                    {allOpponents.map((op, i) => (
-                      <div key={i} className="flex items-center gap-1.5 bg-white/5 rounded-lg px-2.5 py-1">
-                        <img src={op.avatar} alt="" className="w-5 h-5 rounded-full" />
-                        <span className="text-xs text-white/80">{op.username}</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-                <p className="text-xs text-white/70">Перейдите в <span className="text-purple-300 font-medium">Чат матча</span> — там вся информация для начала игры.</p>
-              </div>
-            )}
-
-            {/* Bottom button — desktop */}
-            <div className="flex justify-center">
-              {foundOpponent ? (
-                <button
-                  onClick={() => activeTournamentId && navigate(`/messages/t-${activeTournamentId}`)}
-                  className="px-12 py-3 rounded-xl text-sm font-semibold bg-gradient-to-r from-purple-600 to-pink-600 text-white hover:opacity-90 transition-all"
-                >
-                  💬 Перейти в чат матча
-                </button>
-              ) : (
-                <button
-                  onClick={handleCancelSearch}
-                  disabled={!canCancel}
-                  className="px-12 py-3 rounded-xl text-sm font-semibold bg-red-500/15 border border-red-500/30 text-red-400 hover:bg-red-500/25 transition-all"
-                >
-                  ❌ Отменить поиск
-                </button>
-              )}
-            </div>
-          </main>
-        </div>
-      </div>
+      <SearchingView
+        user={user}
+        bet={bet}
+        teamMode={teamMode}
+        teamCount={teamCount}
+        server={server}
+        searchTime={searchTime}
+        canCancel={canCancel}
+        foundOpponent={foundOpponent}
+        allOpponents={allOpponents}
+        activeGameType={activeGameType}
+        activeWoWMapInfo={activeWoWMapInfo}
+        activeTeamCount={activeTeamCount}
+        activeTournamentId={activeTournamentId}
+        teamsJoinedCount={teamsJoinedCount}
+        prizes={prizes}
+        formatTime={formatTime}
+        onGoBack={handleGoBack}
+        onCancelSearch={handleCancelSearch}
+      />
     );
   }
 
@@ -1129,251 +713,28 @@ const GamePage = () => {
 
         {/* ===== WOW MODE CONTENT ===== */}
         {activeMode === 'wow' && actionTab === 'create' && (
-          <div className="space-y-4">
-            {/* Map Selection - Horizontal Scroll */}
-            <div>
-              <p className="text-xs text-white/60 mb-2">🗺️ Выбери карту</p>
-              <div className="flex gap-3 overflow-x-auto pb-2 snap-x snap-mandatory">
-                {wowMaps.map((map) => (
-                  <div
-                    key={map.id}
-                    onClick={() => setSelectedMap(map)}
-                    className={`flex-shrink-0 w-48 sm:w-52 md:w-56 max-w-[240px] snap-start cursor-pointer rounded-xl overflow-hidden border-2 transition-all
-                              ${selectedMap?.id === map.id 
-                                ? 'border-red-500 ring-2 ring-red-500/30' 
-                                : 'border-white/10 hover:border-white/30'}`}
-                  >
-                    <div className="relative h-[100px] sm:h-[110px] md:h-[120px]">
-                      <img src={map.image} alt={map.name} className="w-full h-full object-cover" />
-                      <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent" />
-                      <div className="absolute top-1.5 right-1.5 bg-black/50 backdrop-blur-sm px-1.5 py-0.5 rounded text-[9px] text-white/70 font-mono">
-                        ID: {map.mapId}
-                      </div>
-                      <div className="absolute bottom-1.5 left-1.5 bg-blue-600/80 backdrop-blur-sm px-2 py-0.5 rounded text-[10px] text-white font-semibold">
-                        {map.format}
-                      </div>
-                    </div>
-                    <div className="bg-dark-200/90 p-2">
-                      <p className="text-xs text-white font-medium truncate">{map.name}</p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Selected Map Info */}
-            <div className="bg-zinc-800/90 backdrop-blur-sm rounded-xl border border-zinc-600 p-4">
-              <p className="text-sm text-white font-medium mb-3">📋 Параметры карты</p>
-              <div className="grid grid-cols-3 gap-2">
-                <div className="bg-zinc-700/80 rounded-lg p-2.5 text-center border border-zinc-600">
-                  <p className="text-xs text-zinc-300 mb-1">Формат</p>
-                  <p className="text-sm font-bold text-purple-300">{selectedMap?.format}</p>
-                </div>
-                <div className="bg-zinc-700/80 rounded-lg p-2.5 text-center border border-zinc-600">
-                  <p className="text-xs text-zinc-300 mb-1">Команд</p>
-                  <p className="text-sm font-bold text-cyan-300">{selectedMap?.teamCount}</p>
-                </div>
-                <div className="bg-zinc-700/80 rounded-lg p-2.5 text-center border border-zinc-600">
-                  <p className="text-xs text-zinc-300 mb-1">Раундов</p>
-                  <p className="text-sm font-bold text-yellow-300">{selectedMap?.rounds}</p>
-                </div>
-              </div>
-              {selectedMap?.rules && (
-                <p className="text-xs text-zinc-300 mt-3 text-center bg-zinc-700/50 rounded-lg py-2 px-3">{selectedMap?.rules}</p>
-              )}
-            </div>
-
-            {/* WoW Bet & Settings */}
-            <div className="bg-dark-200/60 backdrop-blur-sm rounded-xl border border-white/20 p-4">
-              {/* Prize Distribution for WoW */}
-              {(() => {
-                const wowPool = bet * (selectedMap?.teamCount || 2);
-                const wowFee = wowPool * 0.1;
-                const wowNet = wowPool - wowFee;
-                const wowPrizes = selectedMap?.teamCount === 2 
-                  ? [{ place: 1, pct: 100, amount: wowNet.toFixed(0) }, { place: 2, pct: 0, amount: '0' }]
-                  : selectedMap?.teamCount === 3
-                  ? [{ place: 1, pct: 70, amount: (wowNet * 0.7).toFixed(0) }, { place: 2, pct: 30, amount: (wowNet * 0.3).toFixed(0) }, { place: 3, pct: 0, amount: '0' }]
-                  : [{ place: 1, pct: 50, amount: (wowNet * 0.5).toFixed(0) }, { place: 2, pct: 30, amount: (wowNet * 0.3).toFixed(0) }, { place: 3, pct: 20, amount: (wowNet * 0.2).toFixed(0) }, { place: 4, pct: 0, amount: '0' }];
-                return (
-                  <div className="bg-red-600/20 rounded-xl p-3 mb-4 border border-red-500/30">
-                    <div className="flex items-center justify-between mb-2">
-                      <p className="text-xs text-white/60">💰 Выплаты по местам</p>
-                      <span className="text-xs text-white/40">Пул {wowPool} UC • Комиссия {wowFee.toFixed(0)} UC (10%)</span>
-                    </div>
-                    <div className={`grid gap-1 ${wowPrizes.length === 2 ? 'grid-cols-2' : wowPrizes.length === 3 ? 'grid-cols-3' : 'grid-cols-4'}`}>
-                      {wowPrizes.map((p) => (
-                        <div key={p.place} className={`text-center py-1.5 rounded-lg ${p.place === 1 ? 'bg-yellow-500/20' : 'bg-white/5'}`}>
-                          <p className={`text-sm font-bold ${p.place === 1 ? 'text-yellow-400' : p.place === selectedMap?.teamCount ? 'text-red-400' : 'text-white/70'}`}>
-                            {p.amount} UC
-                          </p>
-                          <p className="text-[9px] text-white/40">
-                            {p.place === 1 ? '🥇' : p.place === 2 ? '🥈' : p.place === 3 ? '🥉' : '4️⃣'} {p.pct}%
-                          </p>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                );
-              })()}
-
-              {/* Rating Prediction */}
-              {(() => {
-                const wowMultiplier = selectedMap?.teamCount === 2 ? 1 : selectedMap?.teamCount === 3 ? 1.5 : 2;
-                const winRating = Math.round((10 + bet * 0.5) * wowMultiplier);
-                const loseRating = Math.round((5 + bet * 0.3) * wowMultiplier);
-                return (
-                  <div className="flex justify-center gap-6 mb-4 text-xs">
-                    <span className="text-white/60">Победа: <span className="text-accent-green font-semibold">+{winRating} 🏆</span></span>
-                    <span className="text-white/60">Поражение: <span className="text-red-400 font-semibold">-{loseRating} 🏆</span></span>
-                  </div>
-                );
-              })()}
-
-              {/* Bet Slider */}
-              <div className="mb-4">
-                <div className="flex justify-between items-center mb-3">
-                  <p className="text-xs text-white/60">� Ставка (UC)</p>
-                  <span className="text-xl font-bold text-accent-green">{bet} UC</span>
-                </div>
-                {(() => {
-                  const betValues = [60,120,180,240,300,360,420,480,540,600,720,840,960,1080,1200,1500,1800,2100,2400,2700,3000];
-                  const currentIndex = betValues.indexOf(bet) >= 0 ? betValues.indexOf(bet) : 0;
-                  return (
-                    <>
-                      <input
-                        type="range"
-                        min={0}
-                        max={betValues.length - 1}
-                        value={currentIndex}
-                        onChange={(e) => setBet(betValues[Number(e.target.value)])}
-                        className="w-full h-2 bg-white/10 rounded-lg appearance-none cursor-pointer
-                                 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-5 
-                                 [&::-webkit-slider-thumb]:h-5 [&::-webkit-slider-thumb]:rounded-full 
-                                 [&::-webkit-slider-thumb]:bg-red-500 [&::-webkit-slider-thumb]:shadow-lg
-                                 [&::-webkit-slider-thumb]:border-2 [&::-webkit-slider-thumb]:border-white/30
-                                 [&::-webkit-slider-thumb]:transition-transform [&::-webkit-slider-thumb]:duration-150"
-                      />
-                      <div className="flex justify-between text-xs text-white/40 mt-1">
-                        <span>60 UC</span>
-                        <span>3000 UC</span>
-                      </div>
-                    </>
-                  );
-                })()}
-              </div>
-
-              {/* Server */}
-              <div className="mb-4">
-                <p className="text-xs text-white/60 mb-2">🌍 Сервер</p>
-                <div className="flex flex-wrap gap-2">
-                  {servers.map((s) => {
-                    const isAvailable = s.id === 'europe';
-                    return (
-                      <button
-                        key={s.id}
-                        onClick={() => isAvailable && setServer(s.id)}
-                        disabled={!isAvailable}
-                        className={`px-3 py-1.5 rounded-lg text-xs transition-all
-                                  ${!isAvailable
-                                    ? 'bg-white/5 text-white/20 border border-white/5 cursor-not-allowed'
-                                    : server === s.id 
-                                      ? 'bg-red-600/30 text-red-400 border border-red-500/50' 
-                                      : 'bg-white/5 text-white/60 border border-white/10 hover:bg-white/10'}`}
-                      >
-                        {s.label}{!isAvailable && ' (скоро)'}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* Player IDs - based on playersPerTeam */}
-              <div className="mb-4">
-                <p className="text-sm text-white font-medium mb-2">🆔 ID игроков ({selectedMap?.playersPerTeam} чел.)</p>
-                <div className="space-y-2">
-                  <div>
-                    <input
-                      type="text"
-                      value={playerId}
-                      onChange={(e) => { setPlayerId(e.target.value.replace(/\D/g, '')); setIdError(''); }}
-                      placeholder="Твой ID (10 цифр)"
-                      maxLength={10}
-                      className={`w-full bg-zinc-700/80 border rounded-xl px-4 py-3
-                               text-sm text-white placeholder-zinc-400 outline-none
-                               focus:border-red-500/50 transition-colors ${idError && !validateId(playerId) ? 'border-red-500' : 'border-zinc-600'}`}
-                    />
-                    <p className="text-xs text-zinc-400 mt-1">{playerId.length}/10 цифр</p>
-                  </div>
-                  {(selectedMap?.playersPerTeam ?? 0) >= 2 && (
-                    <div>
-                      <input
-                        type="text"
-                        value={partnerId}
-                        onChange={(e) => { setPartnerId(e.target.value.replace(/\D/g, '')); setIdError(''); }}
-                        placeholder="ID друга #2 (10 цифр)"
-                        maxLength={10}
-                        className="w-full bg-zinc-700/80 border border-zinc-600 rounded-xl px-4 py-3
-                                 text-sm text-white placeholder-zinc-400 outline-none
-                                 focus:border-red-500/50 transition-colors"
-                      />
-                      <p className="text-xs text-zinc-400 mt-1">{partnerId.length}/10 цифр</p>
-                    </div>
-                  )}
-                  {(selectedMap?.playersPerTeam || 0) >= 3 && (
-                    <input
-                      type="text"
-                      value={wowExtraIds[0] || ''}
-                      onChange={(e) => { const n = [...wowExtraIds]; n[0] = e.target.value.replace(/\D/g, ''); setWowExtraIds(n); setIdError(''); }}
-                      placeholder="ID друга #3 (10 цифр)"
-                      maxLength={10}
-                      className="w-full bg-zinc-700/80 border border-zinc-600 rounded-xl px-4 py-3
-                               text-sm text-white placeholder-zinc-400 outline-none
-                               focus:border-red-500/50 transition-colors"
-                    />
-                  )}
-                  {(selectedMap?.playersPerTeam || 0) >= 4 && (
-                    <input
-                      type="text"
-                      value={wowExtraIds[1] || ''}
-                      onChange={(e) => { const n = [...wowExtraIds]; n[1] = e.target.value.replace(/\D/g, ''); setWowExtraIds(n); setIdError(''); }}
-                      placeholder="ID друга #4 (10 цифр)"
-                      maxLength={10}
-                      className="w-full bg-zinc-700/80 border border-zinc-600 rounded-xl px-4 py-3
-                               text-sm text-white placeholder-zinc-400 outline-none
-                               focus:border-red-500/50 transition-colors"
-                    />
-                  )}
-                </div>
-                {idError && <p className="text-red-400 text-xs mt-2">{idError}</p>}
-              </div>
-
-              {/* Warning about cheats */}
-              <div className="bg-white/5 rounded-lg p-3 mb-4">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <p className="text-xs text-red-400/80">⚠️ Использование читов или мошенничества — блокировка, ставка сгорает.</p>
-                  <button 
-                    onClick={() => setShowRulesModal(true)}
-                    className="text-xs text-purple-400 underline hover:text-purple-300"
-                  >
-                    Правила
-                  </button>
-                </div>
-              </div>
-
-              {/* Start Search Button */}
-              <button
-                onClick={handleWoWCreate}
-                disabled={!playerId.trim()}
-                className="w-full py-3.5 rounded-xl bg-red-600 
-                         text-white font-semibold hover:opacity-90 transition-opacity
-                         disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                🔍 Найти соперника
-              </button>
-            </div>
-          </div>
+          <WoWCreateSection
+            wowMaps={wowMaps}
+            selectedMap={selectedMap}
+            setSelectedMap={setSelectedMap}
+            bet={bet}
+            setBet={setBet}
+            server={server}
+            setServer={setServer}
+            playerId={playerId}
+            setPlayerId={setPlayerId}
+            partnerId={partnerId}
+            setPartnerId={setPartnerId}
+            wowExtraIds={wowExtraIds}
+            setWowExtraIds={setWowExtraIds}
+            idError={idError}
+            setIdError={setIdError}
+            createError={createError}
+            onShowRules={() => setShowRulesModal(true)}
+            onCreate={handleWoWCreate}
+          />
         )}
+
 
         {/* ===== WOW JOIN TAB ===== */}
         {activeMode === 'wow' && actionTab === 'join' && (
@@ -1450,192 +811,21 @@ const GamePage = () => {
 
         {/* ===== TDM CREATE TOURNAMENT SECTION ===== */}
         {activeMode === 'tdm' && actionTab === 'create' && (
-        <div className="bg-dark-200/60 backdrop-blur-sm rounded-xl border border-white/20 p-4 mb-4">
-
-          {/* Prediction */}
-          <div className="bg-red-600/20 rounded-xl p-3 mb-4 border border-red-500/30">
-            <div className="flex items-center justify-between mb-2">
-              <p className="text-xs text-white/60">💰 Выплаты по местам</p>
-              <span className="text-xs text-white/40">Пул {totalPool} UC • Комиссия {platformFee.toFixed(0)} UC (10%)</span>
-            </div>
-            <div className={`grid gap-1 ${teamCount === 2 ? 'grid-cols-2' : teamCount === 3 ? 'grid-cols-3' : 'grid-cols-4'}`}>
-              {prizes.map((p) => (
-                <div key={p.place} className={`text-center py-1.5 rounded-lg ${p.place === 1 ? 'bg-yellow-500/20' : 'bg-white/5'}`}>
-                  <p className={`text-sm font-bold ${p.place === 1 ? 'text-yellow-400' : p.place === teamCount ? 'text-red-400' : 'text-white/70'}`}>
-                    {p.amount} UC
-                  </p>
-                  <p className="text-[9px] text-white/40">
-                    {p.place === 1 ? '🥇' : p.place === 2 ? '🥈' : p.place === 3 ? '🥉' : '4️⃣'} {p.pct}%
-                  </p>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Rating Prediction */}
-          {(() => {
-            const teamMultiplier = teamCount === 2 ? 1 : teamCount === 3 ? 1.5 : 2;
-            const winRating = Math.round((10 + bet * 0.5) * teamMultiplier);
-            const loseRating = Math.round((5 + bet * 0.3) * teamMultiplier);
-            return (
-              <div className="flex justify-center gap-6 mb-4 text-xs">
-                <span className="text-white/60">Победа: <span className="text-accent-green font-semibold">+{winRating} 🏆</span></span>
-                <span className="text-white/60">Поражение: <span className="text-red-400 font-semibold">-{loseRating} 🏆</span></span>
-              </div>
-            );
-          })()}
-
-          {/* Bet Slider */}
-          <div className="mb-4">
-            <div className="flex justify-between items-center mb-3">
-              <p className="text-xs text-white/60">💰 Ставка (UC)</p>
-              <span className="text-xl font-bold text-accent-green">{bet} UC</span>
-            </div>
-            {(() => {
-              const betValues = [60,120,180,240,300,360,420,480,540,600,720,840,960,1080,1200,1500,1800,2100,2400,2700,3000];
-              const currentIndex = betValues.indexOf(bet) >= 0 ? betValues.indexOf(bet) : 0;
-              return (
-                <>
-                  <input
-                    type="range"
-                    min={0}
-                    max={betValues.length - 1}
-                    value={currentIndex}
-                    onChange={(e) => setBet(betValues[Number(e.target.value)])}
-                    className="w-full h-2 bg-white/10 rounded-lg appearance-none cursor-pointer
-                             [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-5 
-                             [&::-webkit-slider-thumb]:h-5 [&::-webkit-slider-thumb]:rounded-full 
-                             [&::-webkit-slider-thumb]:bg-red-500 [&::-webkit-slider-thumb]:shadow-lg
-                             [&::-webkit-slider-thumb]:border-2 [&::-webkit-slider-thumb]:border-white/30
-                             [&::-webkit-slider-thumb]:transition-transform [&::-webkit-slider-thumb]:duration-150"
-                  />
-                  <div className="flex justify-between text-xs text-white/40 mt-1">
-                    <span>60 UC</span>
-                    <span>3000 UC</span>
-                  </div>
-                </>
-              );
-            })()}
-          </div>
-
-          {/* Team Mode */}
-          <div className="mb-4">
-            <p className="text-xs text-white/60 mb-2">👥 Режим команды</p>
-            <div className="flex gap-2 mb-3">
-              {(['solo', 'duo'] as TeamMode[]).map((mode) => (
-                <button
-                  key={mode}
-                  onClick={() => setTeamMode(mode)}
-                  className={`flex-1 py-2 rounded-lg text-sm font-medium transition-all border
-                            ${teamMode === mode 
-                              ? 'bg-red-600/30 border-red-500 text-white' 
-                              : 'bg-white/5 border-white/10 text-white/50'}`}
-                >
-                  {mode === 'solo' ? '👤 Solo' : '👥 Duo'}
-                </button>
-              ))}
-            </div>
-            <div className="flex gap-2">
-              {[2, 3, 4].map((count) => (
-                <button
-                  key={count}
-                  onClick={() => setTeamCount(count)}
-                  className={`flex-1 py-2 rounded-lg text-xs font-medium transition-all border
-                            ${teamCount === count 
-                              ? 'bg-red-600/30 border-red-500 text-white' 
-                              : 'bg-white/5 border-white/10 text-white/50'}`}
-                >
-                  {count} команды
-                </button>
-              ))}
-            </div>
-            <p className="text-xs text-white/30 mt-2 text-center">
-              Всего игроков: {teamMode === 'solo' ? teamCount : teamCount * 2}
-            </p>
-          </div>
-
-          {/* Server */}
-          <div className="mb-4">
-            <p className="text-xs text-white/60 mb-2">🌐 Сервер</p>
-            <div className="grid grid-cols-3 gap-2">
-              {servers.slice(0, 3).map((s) => (
-                <button
-                  key={s.id}
-                  onClick={() => setServer(s.id)}
-                  className={`py-2 rounded-lg text-xs font-medium transition-all border
-                            ${server === s.id 
-                              ? 'bg-red-600/30 border-red-500 text-white' 
-                              : 'bg-white/5 border-white/10 text-white/50'}`}
-                >
-                  {s.label}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Player IDs */}
-          <div className="mb-4">
-            <p className="text-xs text-white/60 mb-2">🆔 ID в игре</p>
-            <div className="mb-2">
-              <input
-                type="text"
-                value={playerId}
-                onChange={(e) => { setPlayerId(e.target.value.replace(/\D/g, '')); setIdError(''); }}
-                placeholder="Твой ID (10 цифр)"
-                maxLength={10}
-                className={`w-full bg-white/5 border rounded-lg px-3 py-2.5
-                         text-sm text-white placeholder-white/30 outline-none focus:border-red-500/50 ${idError && !validateId(playerId) ? 'border-red-500' : 'border-white/10'}`}
-              />
-              <p className="text-xs text-white/40 mt-1">{playerId.length}/10 цифр</p>
-            </div>
-            {teamMode === 'duo' && (
-              <div>
-                <input
-                  type="text"
-                  value={partnerId}
-                  onChange={(e) => { setPartnerId(e.target.value.replace(/\D/g, '')); setIdError(''); }}
-                  placeholder="ID напарника (10 цифр)"
-                  maxLength={10}
-                  className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2.5
-                           text-sm text-white placeholder-white/30 outline-none focus:border-red-500/50"
-                />
-                <p className="text-xs text-white/40 mt-1">{partnerId.length}/10 цифр</p>
-              </div>
-            )}
-            {idError && <p className="text-red-400 text-xs mt-2">{idError}</p>}
-          </div>
-
-          {/* Map & Rules Info */}
-          <div className="bg-white/5 rounded-lg p-3 mb-4">
-            <p className="text-xs text-white/70 mb-1">📍 <strong>Карта:</strong> Warehouse (TDM)</p>
-            <div className="flex items-center gap-2 flex-wrap">
-              <p className="text-xs text-red-400/80">⚠️ Использование читов или мошенничества — блокировка, ставка сгорает.</p>
-              <button 
-                onClick={() => setShowRulesModal(true)}
-                className="text-xs text-purple-400 underline hover:text-purple-300"
-              >
-                Подробнее
-              </button>
-            </div>
-          </div>
-
-          {/* Error */}
-          {createError && (
-            <div className="bg-red-500/20 border border-red-500/40 rounded-xl p-3 mb-3">
-              <p className="text-red-400 text-sm">{createError}</p>
-            </div>
-          )}
-
-          {/* Create Button */}
-          <button
-            onClick={handleStartSearch}
-            className="w-full py-3.5 rounded-xl bg-red-600 
-                     text-white font-bold hover:opacity-90 transition-opacity"
-          >
-            🚀 Найти соперника
-          </button>
-        </div>
+          <TDMCreateSection
+            bet={bet} setBet={setBet}
+            teamMode={teamMode} setTeamMode={setTeamMode}
+            teamCount={teamCount} setTeamCount={setTeamCount}
+            server={server} setServer={setServer}
+            playerId={playerId} setPlayerId={setPlayerId}
+            partnerId={partnerId} setPartnerId={setPartnerId}
+            idError={idError} setIdError={setIdError}
+            createError={createError}
+            totalPool={totalPool} platformFee={platformFee} prizes={prizes}
+            onShowRules={() => setShowRulesModal(true)}
+            onStartSearch={handleStartSearch}
+          />
         )}
+
 
         {/* ===== JOIN TOURNAMENT SECTION ===== */}
         {activeMode === 'tdm' && actionTab === 'join' && (
@@ -1818,191 +1008,19 @@ const GamePage = () => {
 
         {/* ===== CLASSIC MODE CONTENT ===== */}
         {activeMode === 'classic' && (
-          <div className="space-y-4">
-            {/* Top-20 Button - Full Width */}
-            <div ref={leadersRef}>
-              <button
-                onClick={() => setShowLeaders(!showLeaders)}
-                className={`w-full py-2.5 rounded-xl text-sm font-medium transition-all flex items-center justify-center gap-2
-                          ${showLeaders 
-                            ? 'bg-yellow-500/30 text-yellow-300 border border-yellow-400' 
-                            : 'bg-yellow-500/15 text-yellow-300 border border-yellow-500/40 hover:bg-yellow-500/25'}`}
-              >
-                👑 Топ-20 лидеров
-                <svg 
-                  className={`w-4 h-4 transition-transform ${showLeaders ? 'rotate-180' : ''}`} 
-                  fill="none" viewBox="0 0 24 24" stroke="currentColor"
-                >
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                </svg>
-              </button>
-
-              {/* Leaders Dropdown for Classic */}
-              {showLeaders && (
-                <div className="bg-dark-200/95 backdrop-blur-md rounded-xl border border-white/20 shadow-xl overflow-hidden mt-2">
-                  <div className="max-h-80 overflow-y-auto">
-                    {classicLeaders.map((leader) => (
-                      <div 
-                        key={leader.id}
-                        className="flex items-center gap-3 px-3 py-2 border-b border-white/5 last:border-0"
-                      >
-                        <span className={`w-6 text-center text-sm font-bold
-                                        ${leader.rank === 1 ? 'text-yellow-400' : 
-                                          leader.rank === 2 ? 'text-gray-300' : 
-                                          leader.rank === 3 ? 'text-orange-400' : 'text-white/40'}`}>
-                          {leader.rank <= 3 ? ['🥇', '🥈', '🥉'][leader.rank - 1] : leader.rank}
-                        </span>
-                        <img src={leader.avatar} alt="" className="w-8 h-8 rounded-full bg-white/10" />
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm text-white font-medium truncate">{leader.username}</p>
-                          <p className="text-xs text-white/40">{leader.wins} побед</p>
-                        </div>
-                        <span className="text-xs text-accent-green font-semibold">{leader.earnings} UC</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* Tournament Cards */}
-            {classicLoading ? (
-              <div className="text-center py-8"><p className="text-white/50 text-sm">Загрузка турниров...</p></div>
-            ) : classicTournaments.length === 0 ? (
-              <div className="text-center py-8"><p className="text-white/50 text-sm">Нет доступных турниров</p></div>
-            ) : (
-            <div className="grid grid-cols-2 xl:grid-cols-3 gap-4">
-              {classicTournaments.map((tournament) => {
-                const timeLeft = new Date(tournament.startTime).getTime() - currentTime;
-                const days = Math.floor(timeLeft / (1000 * 60 * 60 * 24));
-                const hours = Math.floor((timeLeft % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
-                const minutes = Math.floor((timeLeft % (1000 * 60 * 60)) / (1000 * 60));
-                const seconds = Math.floor((timeLeft % (1000 * 60)) / 1000);
-                const cModeLabels: Record<string, string> = { SOLO: '👤 Solo', DUO: '👥 Duo', SQUAD: '🎯 Squad' };
-                const cModeColors: Record<string, string> = { SOLO: 'bg-purple-600', DUO: 'bg-cyan-600', SQUAD: 'bg-orange-600' };
-                const regCount = tournament.registeredPlayers ?? 0;
-                
-                const isExpired = timeLeft <= 0 && !myClassicTournamentIds.has(tournament.id);
-                const isFull = regCount >= tournament.maxParticipants;
-                const isRegistered = myClassicTournamentIds.has(tournament.id);
-                const fillPct = Math.min((regCount / tournament.maxParticipants) * 100, 100);
-                
-                return (
-                  <div 
-                    key={tournament.id}
-                    className={`group relative rounded-2xl overflow-hidden border transition-all ${
-                      isRegistered ? 'border-emerald-500/40 shadow-lg shadow-emerald-500/5' :
-                      isExpired ? 'border-white/5 opacity-50' :
-                      'border-white/10 hover:border-purple-500/30'
-                    }`}
-                    style={{ background: 'linear-gradient(180deg, #1a1a2e 0%, #0d0d15 100%)' }}
-                  >
-                    {/* Map Image */}
-                    <div className="relative h-36">
-                      {tournament.mapImage ? (
-                        <img src={tournament.mapImage} alt={tournament.map} className="w-full h-full object-cover" />
-                      ) : (
-                        <div className="w-full h-full bg-gradient-to-br from-purple-900/60 via-zinc-900 to-zinc-800" />
-                      )}
-                      <div className="absolute inset-0 bg-gradient-to-t from-[#0d0d15] via-black/40 to-transparent" />
-                      <div className="absolute top-3 left-3 flex gap-1.5">
-                        <span className={`${cModeColors[tournament.mode] || 'bg-purple-600'} px-2 py-0.5 rounded-md text-[11px] text-white font-semibold`}>
-                          {cModeLabels[tournament.mode] || tournament.mode}
-                        </span>
-                        <span className="bg-black/50 backdrop-blur-sm px-2 py-0.5 rounded-md text-[11px] text-white/70">{tournament.server}</span>
-                      </div>
-                      <div className="absolute top-3 right-3 bg-emerald-500/20 border border-emerald-500/30 px-2 py-0.5 rounded-md">
-                        <span className="text-[11px] text-emerald-400 font-bold">{tournament.prizePool} UC</span>
-                      </div>
-                      <div className="absolute bottom-3 left-3 right-3">
-                        <p className="text-white font-bold text-base leading-tight">{tournament.title || tournament.map}</p>
-                      </div>
-                    </div>
-                    
-                    {/* Card Body */}
-                    <div className="p-3 space-y-2.5">
-                      {/* Timer + Entry */}
-                      <div className="flex gap-2">
-                        {timeLeft > 0 ? (
-                          <div className="flex-1 flex items-center gap-2 bg-yellow-500/8 border border-yellow-500/15 rounded-xl px-3 py-2">
-                            <div className="w-1.5 h-1.5 rounded-full bg-yellow-400 animate-pulse shrink-0" />
-                            <div>
-                              <p className="text-[10px] text-white/40 mb-0.5">Старт через</p>
-                              <p className="text-sm font-bold text-yellow-400 tabular-nums">{days > 0 && `${days}д `}{hours > 0 && `${hours}:`}{String(minutes).padStart(2,'0')}:{String(seconds).padStart(2,'0')}</p>
-                            </div>
-                          </div>
-                        ) : (
-                          <div className="flex-1 flex items-center justify-center bg-zinc-800/60 border border-white/5 rounded-xl px-3 py-2">
-                            <p className="text-xs font-semibold text-white/30">Регистрация закрыта</p>
-                          </div>
-                        )}
-                        <div className="bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-center min-w-[80px]">
-                          <p className="text-[10px] text-white/40 mb-0.5">Взнос</p>
-                          <p className="text-sm font-bold text-white">{tournament.entryFee} UC</p>
-                        </div>
-                      </div>
-                      
-                      {/* Prizes row */}
-                      <div className="flex gap-1.5">
-                        <div className="flex-1 bg-yellow-500/8 border border-yellow-500/15 rounded-xl py-1.5 text-center">
-                          <p className="text-[9px] text-yellow-500/60">1 место</p>
-                          <p className="text-sm font-extrabold text-yellow-400">{tournament.prize1}</p>
-                        </div>
-                        {tournament.winnerCount >= 2 && (
-                          <div className="flex-1 bg-zinc-400/8 border border-zinc-500/15 rounded-xl py-1.5 text-center">
-                            <p className="text-[9px] text-zinc-400/60">2 место</p>
-                            <p className="text-sm font-extrabold text-zinc-300">{tournament.prize2}</p>
-                          </div>
-                        )}
-                        {tournament.winnerCount >= 3 && (
-                          <div className="flex-1 bg-orange-500/8 border border-orange-500/15 rounded-xl py-1.5 text-center">
-                            <p className="text-[9px] text-orange-400/60">3 место</p>
-                            <p className="text-sm font-extrabold text-orange-400">{tournament.prize3}</p>
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Players bar */}
-                      <div>
-                        <div className="flex items-center justify-between text-[11px] mb-1">
-                          <span className="text-white/40">{regCount}/{tournament.maxParticipants} игроков</span>
-                          <span className={`font-semibold ${isFull ? 'text-red-400' : 'text-purple-400'}`}>{Math.round(fillPct)}%</span>
-                        </div>
-                        <div className="h-1 bg-white/5 rounded-full overflow-hidden">
-                          <div className={`h-full rounded-full ${isFull ? 'bg-red-500' : 'bg-purple-500'}`} style={{ width: `${fillPct}%` }} />
-                        </div>
-                      </div>
-                      
-                      {/* Action Button */}
-                      {isRegistered ? (
-                        <button onClick={() => navigate('/messages')}
-                          className="w-full py-2.5 rounded-xl bg-emerald-500/15 border border-emerald-500/25 text-emerald-400 text-sm font-bold hover:bg-emerald-500/25 transition-colors">
-                          ✅ Зарегистрирован · Чат
-                        </button>
-                      ) : isExpired ? (
-                        <div className="w-full py-2.5 rounded-xl bg-white/3 text-white/25 text-sm font-bold text-center">Регистрация закрыта</div>
-                      ) : isFull ? (
-                        <div className="w-full py-2.5 rounded-xl bg-white/3 text-white/25 text-sm font-bold text-center">Мест нет</div>
-                      ) : (
-                        <button onClick={() => {
-                            if (!isAuthenticated) { setShowAuthModal(true); return; }
-                            setSelectedClassicTournament(tournament);
-                            setClassicPlayerIds(tournament.mode === 'SOLO' ? [''] : tournament.mode === 'DUO' ? ['', ''] : ['', '', '', '']);
-                            setClassicRegError('');
-                            setShowClassicRegistration(true);
-                          }}
-                          className="w-full py-2.5 rounded-xl bg-gradient-to-r from-purple-600 to-purple-500 text-white text-sm font-bold hover:brightness-110 transition-all">
-                          Зарегистрироваться
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-            )}
-          </div>
+          <ClassicSection
+            tournaments={classicTournaments}
+            loading={classicLoading}
+            currentTime={currentTime}
+            myIds={myClassicTournamentIds}
+            onRegister={(t) => {
+              if (!isAuthenticated) { setShowAuthModal(true); return; }
+              setSelectedClassicTournament(t);
+              setShowClassicRegistration(true);
+            }}
+          />
         )}
+
 
         </main>
       </div>
@@ -2113,193 +1131,21 @@ const GamePage = () => {
 
           {/* ===== TDM CREATE TOURNAMENT SECTION (Mobile) ===== */}
           {activeMode === 'tdm' && actionTab === 'create' && (
-          <div className="bg-dark-200/60 backdrop-blur-sm rounded-xl border border-white/20 p-4 mb-4">
-
-            {/* Prediction */}
-            <div className="bg-red-600/20 rounded-xl p-3 mb-4 border border-red-500/30">
-              <div className="flex items-center justify-between mb-2">
-                <p className="text-xs text-white/60">💰 Выплаты по местам</p>
-                <span className="text-xs text-white/40">Пул {totalPool} UC • Комиссия {platformFee.toFixed(0)} UC (10%)</span>
-              </div>
-              <div className={`grid gap-1 ${teamCount === 2 ? 'grid-cols-2' : teamCount === 3 ? 'grid-cols-3' : 'grid-cols-4'}`}>
-                {prizes.map((p) => (
-                  <div key={p.place} className={`text-center py-1.5 rounded-lg ${p.place === 1 ? 'bg-yellow-500/20' : 'bg-white/5'}`}>
-                    <p className={`text-sm font-bold ${p.place === 1 ? 'text-yellow-400' : p.place === teamCount ? 'text-red-400' : 'text-white/70'}`}>
-                      {p.amount} UC
-                    </p>
-                    <p className="text-[9px] text-white/40">
-                      {p.place === 1 ? '🥇' : p.place === 2 ? '🥈' : p.place === 3 ? '🥉' : '4️⃣'} {p.pct}%
-                    </p>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Rating Prediction */}
-            {(() => {
-              const teamMultiplier = teamCount === 2 ? 1 : teamCount === 3 ? 1.5 : 2;
-              const winRating = Math.round((10 + bet * 0.5) * teamMultiplier);
-              const loseRating = Math.round((5 + bet * 0.3) * teamMultiplier);
-              return (
-                <div className="flex justify-center gap-6 mb-4 text-xs">
-                  <span className="text-white/60">Победа: <span className="text-accent-green font-semibold">+{winRating} 🏆</span></span>
-                  <span className="text-white/60">Поражение: <span className="text-red-400 font-semibold">-{loseRating} 🏆</span></span>
-                </div>
-              );
-            })()}
-
-            {/* Bet Slider */}
-            <div className="mb-4">
-              <div className="flex justify-between items-center mb-3">
-                <p className="text-xs text-white/60">💰 Ставка (UC)</p>
-                <span className="text-xl font-bold text-accent-green">{bet} UC</span>
-              </div>
-              {(() => {
-                const betValues = [60,120,180,240,300,360,420,480,540,600,720,840,960,1080,1200,1500,1800,2100,2400,2700,3000];
-                const currentIndex = betValues.indexOf(bet) >= 0 ? betValues.indexOf(bet) : 0;
-                return (
-                  <>
-                    <input
-                      type="range"
-                      min={0}
-                      max={betValues.length - 1}
-                      value={currentIndex}
-                      onChange={(e) => setBet(betValues[Number(e.target.value)])}
-                      className="w-full h-2 bg-white/10 rounded-lg appearance-none cursor-pointer
-                               [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-5 
-                               [&::-webkit-slider-thumb]:h-5 [&::-webkit-slider-thumb]:rounded-full 
-                               [&::-webkit-slider-thumb]:bg-red-500 [&::-webkit-slider-thumb]:shadow-lg
-                               [&::-webkit-slider-thumb]:border-2 [&::-webkit-slider-thumb]:border-white/30"
-                    />
-                    <div className="flex justify-between text-xs text-white/40 mt-1">
-                      <span>60 UC</span>
-                      <span>3000 UC</span>
-                    </div>
-                  </>
-                );
-              })()}
-            </div>
-
-            {/* Team Mode */}
-            <div className="mb-4">
-              <p className="text-xs text-white/60 mb-2">👥 Режим команды</p>
-              <div className="flex gap-2 mb-3">
-                {(['solo', 'duo'] as TeamMode[]).map((mode) => (
-                  <button
-                    key={mode}
-                    onClick={() => setTeamMode(mode)}
-                    className={`flex-1 py-2 rounded-lg text-sm font-medium transition-all border
-                              ${teamMode === mode 
-                                ? 'bg-red-600/30 border-red-500 text-white' 
-                                : 'bg-white/5 border-white/10 text-white/50'}`}
-                  >
-                    {mode === 'solo' ? '👤 Solo' : '👥 Duo'}
-                  </button>
-                ))}
-              </div>
-              <div className="flex gap-2">
-                {[2, 3, 4].map((count) => (
-                  <button
-                    key={count}
-                    onClick={() => setTeamCount(count)}
-                    className={`flex-1 py-2 rounded-lg text-xs font-medium transition-all border
-                              ${teamCount === count 
-                                ? 'bg-red-600/30 border-red-500 text-white' 
-                                : 'bg-white/5 border-white/10 text-white/50'}`}
-                  >
-                    {count} команды
-                  </button>
-                ))}
-              </div>
-              <p className="text-xs text-white/30 mt-2 text-center">
-                Всего игроков: {teamMode === 'solo' ? teamCount : teamCount * 2}
-              </p>
-            </div>
-
-            {/* Server */}
-            <div className="mb-4">
-              <p className="text-xs text-white/60 mb-2">🌐 Сервер</p>
-              <div className="grid grid-cols-3 gap-2">
-                {servers.slice(0, 3).map((s) => (
-                  <button
-                    key={s.id}
-                    onClick={() => setServer(s.id)}
-                    className={`py-2 rounded-lg text-xs font-medium transition-all border
-                              ${server === s.id 
-                                ? 'bg-red-600/30 border-red-500 text-white' 
-                                : 'bg-white/5 border-white/10 text-white/50'}`}
-                  >
-                    {s.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Player IDs */}
-            <div className="mb-4">
-              <p className="text-xs text-white/60 mb-2">🆔 ID в игре</p>
-              <div className="mb-2">
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  value={playerId}
-                  onChange={(e) => { setPlayerId(e.target.value.replace(/\D/g, '')); setIdError(''); }}
-                  placeholder="Твой ID (10 цифр)"
-                  maxLength={10}
-                  className={`w-full bg-white/5 border rounded-lg px-3 py-2.5
-                           text-sm text-white placeholder-white/30 outline-none focus:border-red-500/50 ${idError && !validateId(playerId) ? 'border-red-500' : 'border-white/10'}`}
-                />
-                <p className="text-xs text-white/40 mt-1">{playerId.length}/10 цифр</p>
-              </div>
-              {teamMode === 'duo' && (
-                <div>
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    value={partnerId}
-                    onChange={(e) => { setPartnerId(e.target.value.replace(/\D/g, '')); setIdError(''); }}
-                    placeholder="ID напарника (10 цифр)"
-                    maxLength={10}
-                    className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2.5
-                             text-sm text-white placeholder-white/30 outline-none focus:border-red-500/50"
-                  />
-                  <p className="text-xs text-white/40 mt-1">{partnerId.length}/10 цифр</p>
-                </div>
-              )}
-              {idError && <p className="text-red-400 text-xs mt-2">{idError}</p>}
-            </div>
-
-            {/* Map & Rules Info */}
-            <div className="bg-white/5 rounded-lg p-3 mb-4">
-              <p className="text-xs text-white/70 mb-1">📍 <strong>Карта:</strong> Warehouse (TDM)</p>
-              <div className="flex items-center gap-2 flex-wrap">
-                <p className="text-xs text-red-400/80">⚠️ Использование читов или мошенничества — блокировка, ставка сгорает.</p>
-                <button 
-                  onClick={() => setShowRulesModal(true)}
-                  className="text-xs text-purple-400 underline hover:text-purple-300"
-                >
-                  Подробнее
-                </button>
-              </div>
-            </div>
-
-            {/* Error */}
-            {createError && (
-              <div className="bg-red-500/20 border border-red-500/40 rounded-xl p-3 mb-3">
-                <p className="text-red-400 text-sm">{createError}</p>
-              </div>
-            )}
-
-            {/* Create Button */}
-            <button
-              onClick={handleStartSearch}
-              className="w-full py-3.5 rounded-xl bg-red-600 
-                       text-white font-bold hover:opacity-90 transition-opacity"
-            >
-              🚀 Найти соперника
-            </button>
-          </div>
+            <TDMCreateSection
+              bet={bet} setBet={setBet}
+              teamMode={teamMode} setTeamMode={setTeamMode}
+              teamCount={teamCount} setTeamCount={setTeamCount}
+              server={server} setServer={setServer}
+              playerId={playerId} setPlayerId={setPlayerId}
+              partnerId={partnerId} setPartnerId={setPartnerId}
+              idError={idError} setIdError={setIdError}
+              createError={createError}
+              totalPool={totalPool} platformFee={platformFee} prizes={prizes}
+              onShowRules={() => setShowRulesModal(true)}
+              onStartSearch={handleStartSearch}
+            />
           )}
+
 
           {/* ===== TDM JOIN SECTION (Mobile) ===== */}
           {activeMode === 'tdm' && actionTab === 'join' && (
@@ -2482,177 +1328,26 @@ const GamePage = () => {
 
           {/* ===== WOW MODE CONTENT (Mobile) ===== */}
           {activeMode === 'wow' && actionTab === 'create' && (
-            <div className="space-y-4">
-              {/* Map Selection */}
-              <div>
-                <p className="text-xs text-white/60 mb-2">🗺️ Выбери карту</p>
-                <div className="flex gap-3 overflow-x-auto pb-2">
-                  {wowMaps.map((map) => (
-                    <div
-                      key={map.id}
-                      onClick={() => setSelectedMap(map)}
-                      className={`flex-shrink-0 w-44 cursor-pointer rounded-xl overflow-hidden border-2 transition-all
-                                ${selectedMap?.id === map.id 
-                                  ? 'border-red-500 ring-2 ring-red-500/30' 
-                                  : 'border-white/10'}`}
-                    >
-                      <div className="relative h-24">
-                        <img src={map.image} alt={map.name} className="w-full h-full object-cover" />
-                        <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent" />
-                        <div className="absolute top-1 right-1 bg-black/50 backdrop-blur-sm px-1 py-0.5 rounded text-[8px] text-white/70 font-mono">
-                          ID: {map.mapId}
-                        </div>
-                        <div className="absolute bottom-1 left-1 bg-blue-600/80 backdrop-blur-sm px-1.5 py-0.5 rounded text-[9px] text-white font-semibold">
-                          {map.format}
-                        </div>
-                      </div>
-                      <div className="bg-dark-200/90 p-2">
-                        <p className="text-[11px] text-white font-medium truncate">{map.name}</p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Selected Map Info (Mobile) */}
-              <div className="bg-zinc-800/90 backdrop-blur-sm rounded-xl border border-zinc-600 p-3">
-                <p className="text-sm text-white font-medium mb-2">📋 Параметры карты</p>
-                <div className="grid grid-cols-3 gap-2">
-                  <div className="bg-zinc-700/80 rounded-lg p-2 text-center border border-zinc-600">
-                    <p className="text-xs text-zinc-300">Формат</p>
-                    <p className="text-xs font-bold text-purple-300">{selectedMap?.format}</p>
-                  </div>
-                  <div className="bg-zinc-700/80 rounded-lg p-2 text-center border border-zinc-600">
-                    <p className="text-xs text-zinc-300">Команд</p>
-                    <p className="text-xs font-bold text-cyan-300">{selectedMap?.teamCount}</p>
-                  </div>
-                  <div className="bg-zinc-700/80 rounded-lg p-2 text-center border border-zinc-600">
-                    <p className="text-xs text-zinc-300">Раундов</p>
-                    <p className="text-xs font-bold text-yellow-300">{selectedMap?.rounds}</p>
-                  </div>
-                </div>
-                {selectedMap?.rules && (
-                  <p className="text-xs text-zinc-300 mt-2 text-center bg-zinc-700/50 rounded-lg py-1.5 px-2">{selectedMap?.rules}</p>
-                )}
-              </div>
-
-              {/* WoW Settings */}
-              <div className="bg-dark-200/60 backdrop-blur-sm rounded-xl border border-white/20 p-4">
-                {/* Bet Slider */}
-                <div className="mb-4">
-                  <div className="flex justify-between items-center mb-3">
-                    <p className="text-xs text-white/60">� Ставка (UC)</p>
-                    <span className="text-xl font-bold text-accent-green">{bet} UC</span>
-                  </div>
-                  <input
-                    type="range"
-                    min={60}
-                    max={3000}
-                    step={60}
-                    value={bet}
-                    onChange={(e) => setBet(Number(e.target.value))}
-                    className="w-full h-2 bg-white/10 rounded-lg appearance-none cursor-pointer"
-                  />
-                </div>
-
-                {/* Server */}
-                <div className="mb-4">
-                  <p className="text-xs text-white/60 mb-2">🌍 Сервер</p>
-                  <div className="grid grid-cols-3 gap-2">
-                    {servers.slice(0, 3).map((s) => (
-                      <button
-                        key={s.id}
-                        onClick={() => setServer(s.id)}
-                        className={`py-2 rounded-lg text-xs font-medium transition-all border
-                                  ${server === s.id 
-                                    ? 'bg-red-600/30 border-red-500 text-white' 
-                                    : 'bg-white/5 border-white/10 text-white/50'}`}
-                      >
-                        {s.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Player IDs - based on playersPerTeam (Mobile) */}
-                <div className="mb-4">
-                  <p className="text-xs text-white font-medium mb-2">🆔 ID игроков ({selectedMap?.playersPerTeam} чел.)</p>
-                  <div className="space-y-2">
-                    <div>
-                      <input
-                        type="text"
-                        value={playerId}
-                        onChange={(e) => { setPlayerId(e.target.value.replace(/\D/g, '')); setIdError(''); }}
-                        placeholder="Твой ID (10 цифр)"
-                        maxLength={10}
-                        className={`w-full bg-zinc-700/80 border rounded-lg px-3 py-2.5
-                                 text-sm text-white placeholder-zinc-400 outline-none focus:border-red-500/50 ${idError && !validateId(playerId) ? 'border-red-500' : 'border-zinc-600'}`}
-                      />
-                      <p className="text-xs text-zinc-400 mt-1">{playerId.length}/10 цифр</p>
-                    </div>
-                    {(selectedMap?.playersPerTeam ?? 0) >= 2 && (
-                      <div>
-                        <input
-                          type="text"
-                          value={partnerId}
-                          onChange={(e) => { setPartnerId(e.target.value.replace(/\D/g, '')); setIdError(''); }}
-                          placeholder="ID друга #2 (10 цифр)"
-                          maxLength={10}
-                          className="w-full bg-zinc-700/80 border border-zinc-600 rounded-lg px-3 py-2.5
-                                   text-sm text-white placeholder-zinc-400 outline-none focus:border-red-500/50"
-                        />
-                        <p className="text-xs text-zinc-400 mt-1">{partnerId.length}/10 цифр</p>
-                      </div>
-                    )}
-                    {(selectedMap?.playersPerTeam || 0) >= 3 && (
-                      <input
-                        type="text"
-                        value={wowExtraIds[0] || ''}
-                        onChange={(e) => { const n = [...wowExtraIds]; n[0] = e.target.value.replace(/\D/g, ''); setWowExtraIds(n); setIdError(''); }}
-                        placeholder="ID друга #3 (10 цифр)"
-                        maxLength={10}
-                        className="w-full bg-zinc-700/80 border border-zinc-600 rounded-lg px-3 py-2.5
-                                 text-sm text-white placeholder-zinc-400 outline-none focus:border-red-500/50"
-                      />
-                    )}
-                    {(selectedMap?.playersPerTeam || 0) >= 4 && (
-                      <input
-                        type="text"
-                        value={wowExtraIds[1] || ''}
-                        onChange={(e) => { const n = [...wowExtraIds]; n[1] = e.target.value.replace(/\D/g, ''); setWowExtraIds(n); setIdError(''); }}
-                        placeholder="ID друга #4 (10 цифр)"
-                        maxLength={10}
-                        className="w-full bg-zinc-700/80 border border-zinc-600 rounded-lg px-3 py-2.5
-                                 text-sm text-white placeholder-zinc-400 outline-none focus:border-red-500/50"
-                      />
-                    )}
-                  </div>
-                  {idError && <p className="text-red-400 text-xs mt-2">{idError}</p>}
-                </div>
-
-                {/* Warning about cheats (Mobile) */}
-                <div className="bg-white/5 rounded-lg p-3 mb-4">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <p className="text-xs text-red-400/80">⚠️ Использование читов или мошенничества — блокировка, ставка сгорает.</p>
-                    <button 
-                      onClick={() => setShowRulesModal(true)}
-                      className="text-xs text-purple-400 underline hover:text-purple-300"
-                    >
-                      Правила
-                    </button>
-                  </div>
-                </div>
-
-                {/* Create Button */}
-                <button
-                  onClick={handleWoWCreate}
-                  className="w-full py-3.5 rounded-xl bg-red-600 
-                           text-white font-bold hover:opacity-90 transition-opacity"
-                >
-                  🔍 Найти соперника
-                </button>
-              </div>
-            </div>
+            <WoWCreateSection
+              wowMaps={wowMaps}
+              selectedMap={selectedMap}
+              setSelectedMap={setSelectedMap}
+              bet={bet}
+              setBet={setBet}
+              server={server}
+              setServer={setServer}
+              playerId={playerId}
+              setPlayerId={setPlayerId}
+              partnerId={partnerId}
+              setPartnerId={setPartnerId}
+              wowExtraIds={wowExtraIds}
+              setWowExtraIds={setWowExtraIds}
+              idError={idError}
+              setIdError={setIdError}
+              createError={createError}
+              onShowRules={() => setShowRulesModal(true)}
+              onCreate={handleWoWCreate}
+            />
           )}
 
           {/* ===== WOW JOIN TAB (Mobile) ===== */}
@@ -2730,267 +1425,30 @@ const GamePage = () => {
 
           {/* ===== CLASSIC MODE CONTENT (Mobile) ===== */}
           {activeMode === 'classic' && (
-            <div className="space-y-4">
-              {/* Tournament Cards */}
-              {classicLoading ? (
-                <div className="text-center py-8"><p className="text-white/50 text-sm">Загрузка турниров...</p></div>
-              ) : classicTournaments.length === 0 ? (
-                <div className="text-center py-8"><p className="text-white/50 text-sm">Нет доступных турниров</p></div>
-              ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {classicTournaments.map((tournament) => {
-                  const timeLeft = new Date(tournament.startTime).getTime() - currentTime;
-                  const hours = Math.floor(timeLeft / (1000 * 60 * 60));
-                  const minutes = Math.floor((timeLeft % (1000 * 60 * 60)) / (1000 * 60));
-                  const seconds = Math.floor((timeLeft % (1000 * 60)) / 1000);
-                  const cModeLabels: Record<string, string> = { SOLO: '👤 Solo', DUO: '👥 Duo', SQUAD: '🎯 Squad' };
-                  const cModeColors: Record<string, string> = { SOLO: 'bg-purple-600', DUO: 'bg-cyan-600', SQUAD: 'bg-orange-600' };
-                  const regCount = tournament.registeredPlayers ?? 0;
-                  const isExpiredM = timeLeft <= 0 && !myClassicTournamentIds.has(tournament.id);
-                  const isFullM = regCount >= tournament.maxParticipants;
-                  const isRegM = myClassicTournamentIds.has(tournament.id);
-                  const fillM = Math.min((regCount / tournament.maxParticipants) * 100, 100);
-                  
-                  return (
-                    <div 
-                      key={tournament.id}
-                      className={`rounded-2xl overflow-hidden border transition-all ${
-                        isRegM ? 'border-emerald-500/40' : isExpiredM ? 'border-white/5 opacity-50' : 'border-white/10'
-                      }`}
-                      style={{ background: 'linear-gradient(180deg, #1a1a2e 0%, #0d0d15 100%)' }}
-                    >
-                      <div className="relative h-28">
-                        {tournament.mapImage ? (
-                          <img src={tournament.mapImage} alt={tournament.map} className="w-full h-full object-cover" />
-                        ) : (
-                          <div className="w-full h-full bg-gradient-to-br from-purple-900/60 via-zinc-900 to-zinc-800" />
-                        )}
-                        <div className="absolute inset-0 bg-gradient-to-t from-[#0d0d15] via-black/40 to-transparent" />
-                        <div className="absolute top-2.5 left-2.5 flex gap-1.5">
-                          <span className={`${cModeColors[tournament.mode] || 'bg-purple-600'} px-2 py-0.5 rounded-md text-[11px] text-white font-semibold`}>
-                            {cModeLabels[tournament.mode] || tournament.mode}
-                          </span>
-                          <span className="bg-black/50 px-2 py-0.5 rounded-md text-[11px] text-white/70">{tournament.server}</span>
-                        </div>
-                        <div className="absolute top-2.5 right-2.5 bg-emerald-500/20 border border-emerald-500/30 px-2 py-0.5 rounded-md">
-                          <span className="text-[11px] text-emerald-400 font-bold">{tournament.prizePool} UC</span>
-                        </div>
-                        <div className="absolute bottom-2.5 left-2.5 right-2.5">
-                          <p className="text-white font-bold text-sm leading-tight">{tournament.title || tournament.map}</p>
-                        </div>
-                      </div>
-                      
-                      <div className="p-3 space-y-2">
-                        {/* Timer + Entry */}
-                        <div className="flex gap-2">
-                          {timeLeft > 0 ? (
-                            <div className="flex-1 flex items-center gap-2 bg-yellow-500/8 border border-yellow-500/15 rounded-xl px-2.5 py-1.5">
-                              <div className="w-1.5 h-1.5 rounded-full bg-yellow-400 animate-pulse shrink-0" />
-                              <div>
-                                <p className="text-[10px] text-white/40">Старт через</p>
-                                <p className="text-xs font-bold text-yellow-400 tabular-nums">{hours}:{String(minutes).padStart(2,'0')}:{String(seconds).padStart(2,'0')}</p>
-                              </div>
-                            </div>
-                          ) : (
-                            <div className="flex-1 flex items-center justify-center bg-zinc-800/60 border border-white/5 rounded-xl px-2.5 py-1.5">
-                              <p className="text-[11px] font-semibold text-white/30">Регистрация закрыта</p>
-                            </div>
-                          )}
-                          <div className="bg-white/5 border border-white/10 rounded-xl px-2.5 py-1.5 text-center min-w-[70px]">
-                            <p className="text-[10px] text-white/40">Взнос</p>
-                            <p className="text-xs font-bold text-white">{tournament.entryFee} UC</p>
-                          </div>
-                        </div>
-
-                        {/* Prizes row */}
-                        <div className="flex gap-1.5">
-                          <div className="flex-1 bg-yellow-500/8 border border-yellow-500/15 rounded-xl py-1.5 text-center">
-                            <p className="text-[9px] text-yellow-500/60">1 место</p>
-                            <p className="text-xs font-extrabold text-yellow-400">{tournament.prize1}</p>
-                          </div>
-                          {tournament.winnerCount >= 2 && (
-                            <div className="flex-1 bg-zinc-400/8 border border-zinc-500/15 rounded-xl py-1.5 text-center">
-                              <p className="text-[9px] text-zinc-400/60">2 место</p>
-                              <p className="text-xs font-extrabold text-zinc-300">{tournament.prize2}</p>
-                            </div>
-                          )}
-                          {tournament.winnerCount >= 3 && (
-                            <div className="flex-1 bg-orange-500/8 border border-orange-500/15 rounded-xl py-1.5 text-center">
-                              <p className="text-[9px] text-orange-400/60">3 место</p>
-                              <p className="text-xs font-extrabold text-orange-400">{tournament.prize3}</p>
-                            </div>
-                          )}
-                        </div>
-                        
-                        {/* Players bar */}
-                        <div>
-                          <div className="flex items-center justify-between text-[11px] mb-1">
-                            <span className="text-white/40">{regCount}/{tournament.maxParticipants}</span>
-                            <span className={`font-semibold ${isFullM ? 'text-red-400' : 'text-purple-400'}`}>{Math.round(fillM)}%</span>
-                          </div>
-                          <div className="h-1 bg-white/5 rounded-full overflow-hidden">
-                            <div className={`h-full rounded-full ${isFullM ? 'bg-red-500' : 'bg-purple-500'}`} style={{ width: `${fillM}%` }} />
-                          </div>
-                        </div>
-                        
-                        {/* Action */}
-                        {isRegM ? (
-                          <button onClick={() => navigate('/messages')}
-                            className="w-full py-2 rounded-xl bg-emerald-500/15 border border-emerald-500/25 text-emerald-400 text-xs font-bold">
-                            ✅ Зарегистрирован · Чат
-                          </button>
-                        ) : isExpiredM ? (
-                          <div className="w-full py-2 rounded-xl bg-white/3 text-white/25 text-xs font-bold text-center">Закрыта</div>
-                        ) : isFullM ? (
-                          <div className="w-full py-2 rounded-xl bg-white/3 text-white/25 text-xs font-bold text-center">Мест нет</div>
-                        ) : (
-                          <button onClick={() => {
-                              if (!isAuthenticated) { setShowAuthModal(true); return; }
-                              setSelectedClassicTournament(tournament);
-                              setClassicPlayerIds(tournament.mode === 'SOLO' ? [''] : tournament.mode === 'DUO' ? ['', ''] : ['', '', '', '']);
-                              setClassicRegError('');
-                              setShowClassicRegistration(true);
-                            }}
-                            className="w-full py-2 rounded-xl bg-gradient-to-r from-purple-600 to-purple-500 text-white text-xs font-bold">
-                            Зарегистрироваться
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-              )}
-            </div>
+            <ClassicSection
+              tournaments={classicTournaments}
+              loading={classicLoading}
+              currentTime={currentTime}
+              myIds={myClassicTournamentIds}
+              onRegister={(t) => {
+                if (!isAuthenticated) { setShowAuthModal(true); return; }
+                setSelectedClassicTournament(t);
+                setShowClassicRegistration(true);
+              }}
+            />
           )}
+
         </main>
       </div>
-      {/* ===== RULES MODAL (shared desktop + mobile) ===== */}
-      {showRulesModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
-          <div className="bg-dark-200 border border-white/20 rounded-2xl p-4 max-w-sm w-full">
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="text-base font-bold text-white">📋 Правила турнира</h3>
-              <button onClick={() => setShowRulesModal(false)} className="text-white/50 hover:text-white">
-                ✕
-              </button>
-            </div>
-            <div className="space-y-2 text-xs text-white/70">
-              <p>🚫 <strong className="text-red-400">Запрещено:</strong> читы, эмуляторы, баги</p>
-              <p>⚠️ При нарушении — <strong className="text-red-400">бан аккаунта</strong> + потеря ставки</p>
-              <p>📹 Администрация может запросить видео матча</p>
-              <p>🤝 Споры решаются через поддержку в чате</p>
-              <p>⏱️ На подачу результата — 30 минут после матча</p>
-            </div>
-            <button 
-              onClick={() => setShowRulesModal(false)}
-              className="w-full mt-4 py-2 rounded-lg bg-red-600/30 border border-red-500/50 
-                       text-red-300 text-sm font-medium hover:bg-red-600/40"
-            >
-              Понятно
-            </button>
-          </div>
-        </div>
-      )}
-      {/* ===== CLASSIC REGISTRATION MODAL (shared desktop + mobile) ===== */}
+      {/* ===== RULES MODAL ===== */}
+      {showRulesModal && <RulesModal onClose={() => setShowRulesModal(false)} />}
+      {/* ===== CLASSIC REGISTRATION MODAL ===== */}
       {showClassicRegistration && selectedClassicTournament && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div 
-            className="absolute inset-0 bg-black/70 backdrop-blur-sm"
-            onClick={() => !classicRegLoading && setShowClassicRegistration(false)}
-          />
-          <div className="relative w-full max-w-lg bg-dark-100 rounded-2xl border border-white/20 p-4 pb-6 animate-slide-up"
-               style={{ maxHeight: '80vh', overflowY: 'auto' }}>
-            <div className="w-12 h-1 bg-white/30 rounded-full mx-auto mb-4" />
-            <div className="mb-4">
-              <h3 className="text-lg font-bold text-white">📝 Регистрация на турнир</h3>
-              <p className="text-xs text-white/50">
-                {selectedClassicTournament.title || selectedClassicTournament.map} • {selectedClassicTournament.mode === 'SOLO' ? 'Solo' : selectedClassicTournament.mode === 'DUO' ? 'Duo' : 'Squad'}
-              </p>
-              <p className="text-xs text-white/40 mt-1">
-                Взнос: <span className="text-yellow-400 font-semibold">{selectedClassicTournament.entryFee} UC</span> • Приз: <span className="text-accent-green font-semibold">{selectedClassicTournament.prizePool} UC</span>
-              </p>
-            </div>
-
-            {classicRegError && (
-              <div className="mb-3 px-3 py-2 bg-red-500/10 border border-red-500/30 rounded-lg text-xs text-red-400">{classicRegError}</div>
-            )}
-
-            <div className="space-y-3 mb-4">
-              <p className="text-xs text-white/60">🆔 PUBG Mobile ID (ровно 10 цифр)</p>
-              {classicPlayerIds.map((id, index) => (
-                <div key={index}>
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    maxLength={10}
-                    value={id}
-                    onChange={(e) => {
-                      const val = e.target.value.replace(/\D/g, '').slice(0, 10);
-                      const newIds = [...classicPlayerIds];
-                      newIds[index] = val;
-                      setClassicPlayerIds(newIds);
-                    }}
-                    placeholder={index === 0 ? 'Твой PUBG ID (10 цифр)' : `ID тиммейта ${index} (10 цифр)`}
-                    className={`w-full bg-white/5 border rounded-lg px-3 py-2.5
-                             text-sm text-white placeholder-white/30 outline-none focus:border-purple-500/50
-                             ${id.length > 0 && id.length !== 10 ? 'border-red-500/50' : 'border-white/10'}`}
-                  />
-                  {id.length > 0 && id.length !== 10 && (
-                    <p className="text-[10px] text-red-400 mt-0.5">{id.length}/10 цифр</p>
-                  )}
-                </div>
-              ))}
-            </div>
-            <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-3 mb-4">
-              <p className="text-xs text-yellow-400/90 leading-relaxed">
-                ⚠️ Мы хотели бы напомнить вам о важности соблюдать правила кастом-матча.
-                Если вы оказались на чужом месте и ваше место занято, вам необходимо выйти из лобби.
-                Вас пригласят обратно, когда ваше место освободится.
-              </p>
-            </div>
-            <div className="space-y-2">
-              <button
-                disabled={classicRegLoading}
-                onClick={async () => {
-                  const requiredIds = selectedClassicTournament.mode === 'SOLO' ? 1 : selectedClassicTournament.mode === 'DUO' ? 2 : 4;
-                  const filledIds = classicPlayerIds.slice(0, requiredIds);
-                  // Validate all IDs are exactly 10 digits
-                  for (let i = 0; i < requiredIds; i++) {
-                    if (!/^\d{10}$/.test(filledIds[i] || '')) {
-                      setClassicRegError(`ID ${i === 0 ? 'игрока' : `тиммейта ${i}`} должен быть ровно 10 цифр`);
-                      return;
-                    }
-                  }
-                  setClassicRegLoading(true);
-                  setClassicRegError('');
-                  try {
-                    const result = await classicApi.register(selectedClassicTournament.id, filledIds);
-                    setShowClassicRegistration(false);
-                    loadClassicTournaments();
-                    // Navigate to classic chats page after successful registration
-                    navigate(`/messages/classic-${result.registrationId}`);
-                  } catch (e: any) {
-                    setClassicRegError(e?.message || 'Ошибка регистрации');
-                  }
-                  setClassicRegLoading(false);
-                }}
-                className="w-full py-3 rounded-xl bg-purple-600 
-                         text-white font-bold hover:opacity-90 transition-opacity disabled:opacity-50"
-              >
-                {classicRegLoading ? '⏳ Регистрация...' : `✅ Подтвердить (${selectedClassicTournament.entryFee} UC)`}
-              </button>
-              <button
-                onClick={() => setShowClassicRegistration(false)}
-                disabled={classicRegLoading}
-                className="w-full py-3 rounded-xl bg-white/5 border border-white/10 
-                         text-white/70 font-medium hover:bg-white/10 transition-colors disabled:opacity-50"
-              >
-                Отмена
-              </button>
-            </div>
-          </div>
-        </div>
+        <ClassicRegistrationModal
+          tournament={selectedClassicTournament}
+          onClose={() => setShowClassicRegistration(false)}
+          onSuccess={loadClassicTournaments}
+        />
       )}
       {/* ===== AUTH PROMPT MODAL ===== */}
       <AuthPromptModal
